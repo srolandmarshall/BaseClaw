@@ -1555,4 +1555,281 @@ export const MOCK_DATA: Record<string, any> = {
     owner: "Home Run Heroes",
     ai_recommendation: "Pete Alonso is on your roster (Home Run Heroes). He's a tradeable asset if you need to address your speed or saves weakness.",
   },
+
+  // ── Morning Briefing ──────────────────────────────────────────────────
+  "morning-briefing": {
+    action_items: [
+      { priority: 1, type: "lineup", message: "Start Corbin Carroll (vs LHP)" },
+      { priority: 1, type: "waiver", message: "Add Rece Hinds — 45% owned, trending up fast" },
+      { priority: 2, type: "streaming", message: "Stream Gavin Stone (@ CIN)" },
+      { priority: 3, type: "lineup", message: "Bench J.D. Martinez (rest day)" },
+    ],
+    injury: {
+      injured_active: [{ name: "Julio Rodriguez", position: "OF", status: "DTD", injury_description: "Hamstring tightness", team: "SEA", mlb_id: 677594 }],
+      healthy_il: [],
+      injured_bench: [],
+      il_proper: [{ name: "Spencer Strider", position: "SP", status: "60-Day IL", injury_description: "UCL reconstruction rehab", team: "ATL", mlb_id: 675911 }],
+    },
+    lineup: {
+      games_today: 4,
+      active_off_day: [{ name: "J.D. Martinez", position: "Util", team: "NYM" }],
+      bench_playing: [{ name: "Gavin Stone", position: "SP", team: "LAD" }],
+      il_players: [{ name: "Spencer Strider", position: "SP", team: "ATL" }],
+      suggested_swaps: [{ bench_player: "J.D. Martinez", start_player: "Gavin Stone", position: "Util" }],
+      applied: false,
+    },
+    matchup: {
+      week: 7,
+      my_team: "Home Run Heroes",
+      opponent: "Dynasty Destroyers",
+      score: { wins: 5, losses: 3, ties: 2 },
+      categories: [
+        { name: "HR", my_value: "8", opp_value: "5", result: "win" as const },
+        { name: "ERA", my_value: "3.15", opp_value: "3.82", result: "win" as const },
+        { name: "NSB", my_value: "1", opp_value: "4", result: "loss" as const },
+      ],
+    },
+    strategy: {
+      week: 7,
+      opponent: "Dynasty Destroyers",
+      score: { wins: 5, losses: 3, ties: 2 },
+      categories: [
+        { name: "HR", my_value: "8", opp_value: "5", result: "win" as const, classification: "lock", margin: "+3" },
+        { name: "ERA", my_value: "3.15", opp_value: "3.82", result: "win" as const, classification: "protect", margin: "+0.67" },
+        { name: "NSB", my_value: "1", opp_value: "4", result: "loss" as const, classification: "concede", margin: "-3" },
+      ],
+      opp_transactions: [{ type: "add", player: "Gavin Williams", date: "Mar 1" }],
+      strategy: { target: ["RBI", "TB"], protect: ["ERA", "WHIP"], concede: ["NSB"], lock: ["HR", "OBP"] },
+      waiver_targets: [
+        { name: "Rece Hinds", pid: "67890", pct: 45, categories: ["HR", "TB", "RBI"], team: "CIN", games: 5 },
+        { name: "Gavin Stone", pid: "22222", pct: 62, categories: ["ERA", "WHIP", "QS"], team: "LAD", games: 2 },
+      ],
+      summary: "Target RBI and TB this week while protecting your pitching ratios. Concede NSB — opponent has too big a lead.",
+    },
+    whats_new: {
+      last_check: "2026-03-01",
+      check_time: "7:30 AM",
+      injuries: [{ name: "Julio Rodriguez", status: "DTD", position: "OF", section: "active" }],
+      pending_trades: [],
+      league_activity: [
+        { type: "add", player: "Gavin Williams", team: "Dynasty Destroyers" },
+        { type: "drop", player: "Nick Lodolo", team: "Dynasty Destroyers" },
+      ],
+      trending: [
+        { name: "Rece Hinds", direction: "added", delta: "+12%", percent_owned: 45 },
+        { name: "Gavin Stone", direction: "added", delta: "+8%", percent_owned: 62 },
+      ],
+      prospects: [],
+    },
+    waiver_batters: null,
+    waiver_pitchers: null,
+    edit_date: "Today 11:00 AM ET",
+    ai_recommendation: "Priority today: Stream Gavin Stone for his favorable matchup, and pick up Rece Hinds before your opponent does. His power upside fills your HR gap.",
+  },
+
+  // ── Punt Advisor ──────────────────────────────────────────────────────
+  "punt-advisor": {
+    team_name: "Home Run Heroes",
+    current_rank: 4,
+    num_teams: 12,
+    categories: [
+      { name: "R", rank: 3, value: "287", total: 12, recommendation: "target", reasoning: "Strong, keep investing", cost_to_compete: "low", lower_is_better: false },
+      { name: "HR", rank: 2, value: "78", total: 12, recommendation: "target", reasoning: "Core strength", cost_to_compete: "low", lower_is_better: false },
+      { name: "NSB", rank: 9, value: "22", total: 12, recommendation: "punt", reasoning: "Too expensive to fix, low correlation with power", cost_to_compete: "high", lower_is_better: false },
+      { name: "K_negative", rank: 11, value: "412", total: 12, recommendation: "punt", reasoning: "Power hitters strike out — accept it", cost_to_compete: "very high", lower_is_better: true },
+      { name: "AVG", rank: 5, value: ".261", total: 12, recommendation: "hold", reasoning: "Middle of the pack, not worth chasing", cost_to_compete: "medium", lower_is_better: false },
+      { name: "OBP", rank: 4, value: ".335", total: 12, recommendation: "target", reasoning: "Correlated with runs scored", cost_to_compete: "low", lower_is_better: false },
+      { name: "ERA", rank: 3, value: "3.42", total: 12, recommendation: "target", reasoning: "Strong staff, protect this edge", cost_to_compete: "low", lower_is_better: true },
+      { name: "NSV", rank: 8, value: "18", total: 12, recommendation: "hold", reasoning: "Can improve cheaply via closer adds", cost_to_compete: "medium", lower_is_better: false },
+    ],
+    punt_candidates: ["NSB", "K_negative"],
+    target_categories: ["R", "HR", "OBP", "ERA"],
+    correlation_warnings: ["Punting NSB may also hurt R — monitor stolen base attempts on the basepaths"],
+    strategy_summary: "Lean into your power/OBP build. Punt speed (NSB) and strikeouts (K) to double down on HR, R, OBP, and pitching ratios. This frees roster spots for power bats and high-K pitchers.",
+  },
+
+  // ── Playoff Planner ───────────────────────────────────────────────────
+  "playoff-planner": {
+    current_rank: 4,
+    playoff_cutoff: 6,
+    games_back: 0,
+    team_name: "Home Run Heroes",
+    record: "30-18-12",
+    num_teams: 12,
+    category_gaps: [
+      { category: "NSB", current_rank: 9, target_rank: 6, places_to_gain: 3, gap: "-14 SB", priority: "high", cost_to_compete: "2-3 speed adds" },
+      { category: "NSV", current_rank: 8, target_rank: 5, places_to_gain: 3, gap: "-8 SV", priority: "medium", cost_to_compete: "1 closer add" },
+      { category: "K_negative", current_rank: 11, target_rank: 8, places_to_gain: 3, gap: "-35 K", priority: "low", cost_to_compete: "roster overhaul" },
+    ],
+    recommended_actions: [
+      { action_type: "trade", description: "Trade J.D. Martinez for a speed + saves package", impact: "+3 NSB ranks, +2 NSV ranks", priority: "high" },
+      { action_type: "waiver", description: "Add Rece Hinds — speed upside with power", impact: "+1 NSB rank", priority: "medium" },
+      { action_type: "hold", description: "Keep pitching staff intact — ERA/WHIP are top 3", impact: "Protect core edge", priority: "low" },
+    ],
+    target_categories: ["R", "HR", "OBP", "ERA", "WHIP"],
+    punt_categories: ["K_negative"],
+    playoff_probability: 0.82,
+    summary: "You're in a playoff position at rank 4. Shore up saves with a closer add, and consider a speed trade to climb 2-3 spots in NSB. Don't chase K_negative — it's a punt category in your build.",
+  },
+
+  // ── Optimal Moves ─────────────────────────────────────────────────────
+  "optimal-moves": {
+    roster_z_total: 14.2,
+    projected_z_after: 16.8,
+    net_improvement: 2.6,
+    moves: [
+      { rank: 1, drop: { name: "Nick Lodolo", player_id: "12345", pos: "SP", z_score: -0.8, tier: "Weak" }, add: { name: "Rece Hinds", player_id: "67890", pos: "OF", z_score: 1.2, tier: "Strong", percent_owned: 45 }, z_improvement: 2.0, categories_gained: ["HR", "TB", "RBI"], categories_lost: ["IP", "QS"] },
+      { rank: 2, drop: { name: "TBD Streamer", player_id: "11111", pos: "SP", z_score: -0.3, tier: "Weak" }, add: { name: "Gavin Stone", player_id: "22222", pos: "SP", z_score: 0.3, tier: "Solid", percent_owned: 62 }, z_improvement: 0.6, categories_gained: ["ERA", "WHIP", "QS"], categories_lost: [] },
+    ],
+    summary: "Two moves available: Adding Rece Hinds is the highest-impact move (+2.0 z), and streaming Gavin Stone improves pitching ratios. Combined net improvement: +2.6 z-score.",
+  },
+
+  // ── IL Stash Advisor ──────────────────────────────────────────────────
+  "il-stash-advisor": {
+    il_slots_used: 2,
+    il_slots_total: 4,
+    your_il_players: [
+      { name: "Julio Rodriguez", player_id: "jr01", pos: "OF", injury: "Hamstring strain", return_date: "2026-04-28", upside: 9.2, stash_grade: "A", recommendation: "hold" },
+      { name: "Spencer Strider", player_id: "ss01", pos: "SP", injury: "UCL reconstruction", return_date: "2026-06-15", upside: 8.5, stash_grade: "A", recommendation: "hold" },
+    ],
+    fa_stash_candidates: [
+      { name: "Reese Olson", player_id: "ro01", pos: "SP", injury: "Shoulder inflammation", return_date: "2026-05-10", percent_owned: 38, upside: 6.4, stash_grade: "B", z_score: 0.8, tier: "Solid" },
+      { name: "DL Hall", player_id: "dh01", pos: "SP", injury: "Knee sprain", return_date: "2026-05-05", percent_owned: 22, upside: 7.1, stash_grade: "B+", z_score: 1.1, tier: "Strong" },
+    ],
+    ai_recommendation: "You have 2 open IL slots. Stash DL Hall (B+ grade, back May 5) — his K upside is perfect for your build. Reese Olson is a backup option if Hall is taken.",
+  },
+
+  // ── Trash Talk ────────────────────────────────────────────────────────
+  "trash-talk": {
+    opponent: "Dynasty Destroyers",
+    intensity: "savage",
+    week: 7,
+    context: { your_rank: 4, their_rank: 1, score: "11-7-2" },
+    lines: [
+      "Your dynasty is about to get destroyed by my Week 7 lineup.",
+      "Enjoy first place while it lasts — my bats are heating up.",
+      "I've got more homers this week than your whole bench has all season.",
+      "Your pitching staff called — they want to know when the bleeding stops.",
+    ],
+    featured_line: "They call you Dynasty Destroyers, but the only thing getting destroyed this week is your ERA.",
+  },
+
+  // ── Rival History ─────────────────────────────────────────────────────
+  "rival-history": {
+    your_team: "Home Run Heroes",
+    rivals: [
+      { opponent: "Dynasty Destroyers", record: "8-12-2", wins: 8, losses: 12, ties: 2, last_result: "loss", last_week: "6", dominance: "dominated" },
+      { opponent: "The Lumber Yard", record: "10-8-4", wins: 10, losses: 8, ties: 4, last_result: "win", last_week: "5", dominance: "even" },
+      { opponent: "Steal Everything", record: "14-6-2", wins: 14, losses: 6, ties: 2, last_result: "win", last_week: "6", dominance: "dominant" },
+      { opponent: "Ace Ventura's Pitchers", record: "9-9-4", wins: 9, losses: 9, ties: 4, last_result: "tie", last_week: "4", dominance: "even" },
+      { opponent: "Waiver Wire Heroes", record: "12-8-2", wins: 12, losses: 8, ties: 2, last_result: "win", last_week: "3", dominance: "strong" },
+    ],
+    seasons_scanned: ["2026", "2025", "2024"],
+  },
+
+  // ── Achievements ──────────────────────────────────────────────────────
+  achievements: {
+    total_earned: 7,
+    total_available: 15,
+    team_name: "Home Run Heroes",
+    record: "30-18-12",
+    current_rank: 4,
+    current_streak: 3,
+    longest_streak: 5,
+    achievements: [
+      { name: "Homer Happy", description: "Lead the league in HR for 3+ weeks", earned: true, value: "4 weeks", icon: "\u{1F4A5}" },
+      { name: "Iron Man", description: "Zero IL moves all season", earned: false, value: null, icon: "\u{1F9BE}" },
+      { name: "Hot Streak", description: "Win 3 consecutive matchups", earned: true, value: "3 in a row", icon: "\u{1F525}" },
+      { name: "Trade Master", description: "Win a trade by 5+ z-score", earned: true, value: "+6.2 z", icon: "\u{1F91D}" },
+      { name: "Waiver Wizard", description: "Add 3+ players who outperform projections", earned: true, value: "4 pickups", icon: "\u{1FA84}" },
+      { name: "Category King", description: "Lead the league in 5+ categories simultaneously", earned: false, value: null, icon: "\u{1F451}" },
+      { name: "Comeback Kid", description: "Win a matchup after trailing through Saturday", earned: true, value: "Week 4", icon: "\u{1F4AA}" },
+      { name: "Perfect Week", description: "Win all 20 categories in one week", earned: false, value: null, icon: "\u{2B50}" },
+      { name: "Draft Day Genius", description: "3+ draft picks in the top 20 at their position", earned: true, value: "4 picks", icon: "\u{1F3AF}" },
+      { name: "Speed Demon", description: "Lead the league in NSB for 3+ weeks", earned: false, value: null, icon: "\u{26A1}" },
+      { name: "Ace Collector", description: "Roster 3+ pitchers with sub-3.00 ERA", earned: true, value: "3 aces", icon: "\u{1F3B0}" },
+    ],
+  },
+
+  // ── Weekly Narrative ──────────────────────────────────────────────────
+  "weekly-narrative": {
+    week: 6,
+    result: "win",
+    score: "11-7-2",
+    opponent: "Steal Everything",
+    categories: [
+      { name: "R", your_value: "48", opp_value: "42", result: "win" },
+      { name: "HR", your_value: "14", opp_value: "8", result: "win" },
+      { name: "RBI", your_value: "52", opp_value: "38", result: "win" },
+      { name: "NSB", your_value: "3", opp_value: "11", result: "loss" },
+      { name: "AVG", your_value: ".271", opp_value: ".258", result: "win" },
+      { name: "ERA", your_value: "3.15", opp_value: "3.82", result: "win" },
+      { name: "WHIP", your_value: "1.08", opp_value: "1.22", result: "win" },
+      { name: "K", your_value: "68", opp_value: "71", result: "loss" },
+      { name: "NSV", your_value: "4", opp_value: "6", result: "loss" },
+      { name: "QS", your_value: "5", opp_value: "4", result: "win" },
+    ],
+    mvp_category: { name: "HR", your_value: "14", opp_value: "8" },
+    weakness: { name: "NSB", your_value: "3", opp_value: "11" },
+    standings_change: { from: 5, to: 4, direction: "up" },
+    current_rank: 4,
+    key_moves: ["Streamed Gavin Stone for a QS win", "Sat J.D. Martinez on his off day to protect AVG"],
+    narrative: "A dominant 11-7-2 win over Steal Everything powered by a monster HR week (14). Your power bats carried the offense while the pitching staff held firm on ERA and WHIP. The speed gap (3 vs 11 NSB) remains the Achilles heel, but this win moves you up to 4th place heading into Week 7.",
+  },
+
+  // ── FAAB Recommend ────────────────────────────────────────────────────
+  "faab-recommend": {
+    player: { name: "Rece Hinds", z_final: 1.2, tier: "Strong", pos: "OF", team: "CIN" },
+    recommended_bid: 18,
+    bid_range: { low: 12, high: 24 },
+    faab_remaining: 72,
+    faab_after: 54,
+    pct_of_budget: 18,
+    reasoning: [
+      "Strong power upside — 95th percentile exit velocity",
+      "Only 45% owned — window closing fast",
+      "Fills HR/TB need in your roster build",
+      "Young player with breakout trajectory",
+    ],
+    category_impact: {
+      HR: { add_z: 0.8, drop_z: 0.0, delta: 0.8, direction: "up" },
+      TB: { add_z: 0.6, drop_z: 0.0, delta: 0.6, direction: "up" },
+      RBI: { add_z: 0.4, drop_z: 0.0, delta: 0.4, direction: "up" },
+      AVG: { add_z: -0.2, drop_z: 0.0, delta: -0.2, direction: "down" },
+      K_negative: { add_z: -0.3, drop_z: 0.0, delta: -0.3, direction: "down" },
+    },
+    improving_categories: ["HR", "TB", "RBI"],
+  },
+
+  // ── Ownership Trends ──────────────────────────────────────────────────
+  "ownership-trends": {
+    player_name: "Rece Hinds",
+    player_id: "67890",
+    trend: [
+      { date: "2026-04-01", pct_owned: 12 },
+      { date: "2026-04-05", pct_owned: 15 },
+      { date: "2026-04-08", pct_owned: 18 },
+      { date: "2026-04-11", pct_owned: 22 },
+      { date: "2026-04-14", pct_owned: 28 },
+      { date: "2026-04-17", pct_owned: 35 },
+      { date: "2026-04-20", pct_owned: 45 },
+    ],
+    current_pct: 45,
+    direction: "rising",
+    delta_7d: 10,
+    delta_30d: 33,
+  },
+
+  // ── Roster Stats ──────────────────────────────────────────────────────
+  "roster-stats": {
+    players: [
+      { name: "Pete Alonso", player_id: "pa01", position: "1B", eligible_positions: ["1B", "Util"], stats: { R: 24, H: 42, HR: 14, RBI: 38, AVG: 0.268, OBP: 0.342 } },
+      { name: "Corbin Carroll", player_id: "cc01", position: "OF", eligible_positions: ["OF", "Util"], stats: { R: 32, H: 48, HR: 8, RBI: 22, AVG: 0.285, OBP: 0.365 } },
+      { name: "Bobby Witt Jr.", player_id: "bw01", position: "SS", eligible_positions: ["SS", "3B", "Util"], stats: { R: 38, H: 56, HR: 10, RBI: 30, AVG: 0.302, OBP: 0.348 } },
+      { name: "Zack Wheeler", player_id: "zw01", position: "SP", eligible_positions: ["SP"], stats: { IP: 52.1, W: 4, K: 58, ERA: 2.92, WHIP: 1.05, QS: 5 } },
+      { name: "Emmanuel Clase", player_id: "ec01", position: "RP", eligible_positions: ["RP"], stats: { IP: 22.0, W: 2, K: 24, ERA: 1.23, WHIP: 0.82, SV: 14, HLD: 0 } },
+    ],
+    period: "Season",
+    week: null,
+  },
 };

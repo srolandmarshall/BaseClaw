@@ -33,6 +33,18 @@ const WeekPlannerView = lazy(() => import("../season-app/week-planner-view").the
 const CloserMonitorView = lazy(() => import("../season-app/closer-monitor-view").then(m => ({ default: m.CloserMonitorView })));
 const PitcherMatchupView = lazy(() => import("../season-app/pitcher-matchup-view").then(m => ({ default: m.PitcherMatchupView })));
 const CategoryTrendView = lazy(() => import("../season-app/category-trend-view").then(m => ({ default: m.CategoryTrendView })));
+const MorningBriefingView = lazy(() => import("../season-app/morning-briefing-view").then(m => ({ default: m.MorningBriefingView })));
+const PuntAdvisorView = lazy(() => import("../season-app/punt-advisor-view").then(m => ({ default: m.PuntAdvisorView })));
+const PlayoffPlannerView = lazy(() => import("../season-app/playoff-planner-view").then(m => ({ default: m.PlayoffPlannerView })));
+const OptimalMovesView = lazy(() => import("../season-app/optimal-moves-view").then(m => ({ default: m.OptimalMovesView })));
+const ILStashAdvisorView = lazy(() => import("../season-app/il-stash-advisor-view").then(m => ({ default: m.ILStashAdvisorView })));
+const TrashTalkView = lazy(() => import("../season-app/trash-talk-view").then(m => ({ default: m.TrashTalkView })));
+const RivalHistoryView = lazy(() => import("../season-app/rival-history-view").then(m => ({ default: m.RivalHistoryView })));
+const AchievementsView = lazy(() => import("../season-app/achievements-view").then(m => ({ default: m.AchievementsView })));
+const WeeklyNarrativeView = lazy(() => import("../season-app/weekly-narrative-view").then(m => ({ default: m.WeeklyNarrativeView })));
+const FaabRecommendView = lazy(() => import("../season-app/faab-recommend-view").then(m => ({ default: m.FaabRecommendView })));
+const OwnershipTrendsView = lazy(() => import("../season-app/ownership-trends-view").then(m => ({ default: m.OwnershipTrendsView })));
+const RosterStatsView = lazy(() => import("../season-app/roster-stats-view").then(m => ({ default: m.RosterStatsView })));
 // Draft
 const DraftStatusView = lazy(() => import("../draft-app/draft-status-view").then(m => ({ default: m.DraftStatusView })));
 const DraftRecommendView = lazy(() => import("../draft-app/draft-recommend-view").then(m => ({ default: m.DraftRecommendView })));
@@ -124,6 +136,18 @@ export const VIEW_GROUPS: ViewGroup[] = [
       { id: "closer-monitor", label: "Closer Monitor", component: CloserMonitorView, props: { app: null, navigate: noop } },
       { id: "pitcher-matchup", label: "Pitcher Matchup", component: PitcherMatchupView },
       { id: "category-trends", label: "Category Trends", component: CategoryTrendView },
+      { id: "morning-briefing", label: "Morning Briefing", component: MorningBriefingView, props: { app: null, navigate: noop } },
+      { id: "punt-advisor", label: "Punt Advisor", component: PuntAdvisorView, props: { app: null, navigate: noop } },
+      { id: "playoff-planner", label: "Playoff Planner", component: PlayoffPlannerView, props: { app: null, navigate: noop } },
+      { id: "optimal-moves", label: "Optimal Moves", component: OptimalMovesView, props: { app: null, navigate: noop } },
+      { id: "il-stash-advisor", label: "IL Stash Advisor", component: ILStashAdvisorView, props: { app: null, navigate: noop } },
+      { id: "trash-talk", label: "Trash Talk", component: TrashTalkView, props: { app: null, navigate: noop } },
+      { id: "rival-history", label: "Rival History", component: RivalHistoryView, props: { app: null, navigate: noop } },
+      { id: "achievements", label: "Achievements", component: AchievementsView, props: { app: null, navigate: noop } },
+      { id: "weekly-narrative", label: "Weekly Narrative", component: WeeklyNarrativeView, props: { app: null, navigate: noop } },
+      { id: "faab-recommend", label: "FAAB Recommend", component: FaabRecommendView, props: { app: null, navigate: noop } },
+      { id: "ownership-trends", label: "Ownership Trends", component: OwnershipTrendsView, props: { app: null, navigate: noop } },
+      { id: "roster-stats", label: "Roster Stats", component: RosterStatsView, props: { app: null, navigate: noop } },
     ],
   },
   {
