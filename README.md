@@ -12,7 +12,6 @@ Fantasy Baseball MCP Server for Claude. Manage your Yahoo Fantasy Baseball leagu
 
 - [What It Does](#what-it-does)
 - [Quick Start](#quick-start)
-- [Connecting to Claude](#connecting-to-claude)
 - [Agent Orchestrators (OpenClaw)](#agent-orchestrators-openclaw)
 - [MCP Tools](#mcp-tools)
 - [CLI Commands](#cli-commands)
@@ -77,33 +76,20 @@ Claude decides which tools to call and in what order based on your question. Com
 
 ## Quick Start
 
-### One-command install
+**Prerequisites:** Docker and `docker compose`
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jweingardt12/baseclaw/main/scripts/install.sh | bash
 ```
 
-Or tell your OpenClaw agent: **"install github.com/jweingardt12/baseclaw"**
-
-**ClawHub:** `clawhub install baseclaw` — uses `SKILL.md` for automated setup.
-
-The installer handles everything: pulls the Docker image, prompts for your Yahoo API credentials, starts the container, runs Yahoo OAuth discovery, and configures your MCP client (Claude Code, Claude Desktop, or OpenClaw).
-
-**Prerequisites:** Docker and `docker compose`
-
-**Uninstall:**
-```bash
-curl -fsSL https://raw.githubusercontent.com/jweingardt12/baseclaw/main/scripts/install.sh | bash -s -- --uninstall
-```
+The installer pulls the Docker image, prompts for Yahoo API credentials, starts the container, runs OAuth discovery, and configures your MCP client. Or tell your OpenClaw agent: **"install github.com/jweingardt12/baseclaw"**
 
 <details>
 <summary><strong>Manual setup</strong></summary>
 
-#### 1. Get Yahoo API credentials
+**1. Get Yahoo API credentials** — Go to [developer.yahoo.com/apps/create](https://developer.yahoo.com/apps/create), create an app with **Fantasy Sports** read permissions and `oob` as the redirect URI.
 
-Go to [developer.yahoo.com/apps/create](https://developer.yahoo.com/apps/create), create an app with **Fantasy Sports** read permissions and `oob` as the redirect URI. Copy the consumer key and secret.
-
-#### 2. Configure and run
+**2. Configure and run:**
 
 ```bash
 cp docker-compose.example.yml docker-compose.yml
@@ -113,43 +99,15 @@ mkdir -p config data
 docker compose up -d
 ```
 
-The container auto-generates `config/yahoo_oauth.json` from your env vars on first start. You don't need to create this file manually.
-
-#### 3. Find your league and team IDs
-
-On the first API call, Yahoo will prompt you to authorize the app. Run `discover` to trigger auth and find your IDs in one step:
+**3. Discover your league** — triggers Yahoo OAuth and finds your league/team IDs:
 
 ```bash
 ./yf discover
 ```
 
-Follow the prompt — open the URL, log in, paste the verification code. The command then prints your current-season leagues and teams:
+Copy the printed `LEAGUE_ID` and `TEAM_ID` into `.env`, then `docker compose up -d` to restart.
 
-```
-Your 469 MLB Fantasy Leagues:
-
-  1. My League Name
-     Season: 2026  |  Teams: 12
-     LEAGUE_ID=469.l.12345
-     TEAM_ID=469.l.12345.t.7  (My Team Name)
-
-Add these to your .env file:
-
-  LEAGUE_ID=469.l.12345
-  TEAM_ID=469.l.12345.t.7
-```
-
-Copy the values into `.env`, then restart:
-
-```bash
-docker compose up -d
-```
-
-Tokens refresh automatically after the initial authorization.
-
-#### 4. Connect to Claude
-
-Add to your `.mcp.json` (Claude Code) or `claude_desktop_config.json` (Claude Desktop):
+**4. Connect to Claude** — add to `.mcp.json` (Claude Code) or `claude_desktop_config.json` (Claude Desktop):
 
 ```json
 {
@@ -162,109 +120,40 @@ Add to your `.mcp.json` (Claude Code) or `claude_desktop_config.json` (Claude De
 }
 ```
 
-That's it. Everything runs inside Docker — no local dependencies beyond Docker itself.
+Claude Desktop config paths: **macOS** `~/Library/Application Support/Claude/claude_desktop_config.json` · **Windows** `%APPDATA%\Claude\claude_desktop_config.json`
 
 </details>
 
-### 5. Enable write operations (optional)
+<details>
+<summary><strong>Claude.ai (remote access)</strong></summary>
 
-To let Claude make roster moves (add, drop, trade, set lineup), set `ENABLE_WRITE_OPS=true` in `.env`, rebuild with `docker compose up -d`, and set up a browser session:
+Claude.ai needs the server reachable over HTTPS. Set `MCP_SERVER_URL` and `MCP_AUTH_PASSWORD` in `.env`, put a reverse proxy (Caddy, nginx, Cloudflare Tunnel, Tailscale Funnel, Pangolin) in front of port 4951, and rebuild with `docker compose up -d`.
+
+In Claude.ai: Settings > Integrations > Add MCP Server > enter `https://your-domain.com/mcp`. You'll be prompted for your password. The MCP server implements OAuth 2.1 — no third-party auth provider needed.
+
+</details>
+
+<details>
+<summary><strong>Write operations (optional)</strong></summary>
+
+To let Claude make roster moves (add, drop, trade, set lineup), set `ENABLE_WRITE_OPS=true` in `.env`, rebuild, and set up a browser session:
 
 ```bash
 ./yf browser-login
 ```
 
-This opens a browser — log into Yahoo manually. The session saves to `config/yahoo_session.json` and lasts 2-4 weeks.
+Log into Yahoo in the browser that opens. The session saves to `config/yahoo_session.json` and lasts 2-4 weeks.
 
-### 6. Enable preview dashboard (optional)
-
-To browse all UI views in your browser, set `ENABLE_PREVIEW=true` in `.env` and rebuild:
-
-```bash
-docker compose up -d --build
-```
-
-Then open `http://localhost:4951/preview` (or your `MCP_SERVER_URL/preview`). The preview app lets you switch between mock and live data, toggle dark/light mode, and explore every view the MCP server can render.
-
-## Connecting to Claude
-
-The MCP server supports two transports: **stdio** (local, for Claude Code and Claude Desktop) and **Streamable HTTP** (remote, for Claude.ai). Both use the same tools and backend.
-
-**Claude Code / Claude Desktop** — Add the config from [Quick Start step 4](#4-connect-to-claude) to `.mcp.json` (Claude Code) or `claude_desktop_config.json` (Claude Desktop). Config file paths for Claude Desktop:
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
-
-Restart the app after saving.
-
-### Claude.ai (remote access)
-
-Claude.ai can't run local processes, so the MCP server needs to be reachable over the internet. You need a machine running Docker, a domain name, and a reverse proxy for HTTPS.
-
-**1. Set env vars** in `.env`:
-
-```bash
-MCP_SERVER_URL=https://your-domain.com
-MCP_AUTH_PASSWORD=your_secure_password
-```
-
-`MCP_SERVER_URL` must match exactly what Claude.ai connects to — it's used to generate OAuth callback URLs.
-
-**2. Set up a reverse proxy** to forward HTTPS to the container's port 4951:
-
-<details>
-<summary>Caddy (automatic HTTPS)</summary>
-
-```
-your-domain.com {
-    reverse_proxy localhost:4951
-}
-```
 </details>
 
 <details>
-<summary>nginx</summary>
+<summary><strong>Preview dashboard (optional)</strong></summary>
 
-```nginx
-server {
-    listen 443 ssl;
-    server_name your-domain.com;
-    ssl_certificate /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
+Set `ENABLE_PREVIEW=true` in `.env`, rebuild with `docker compose up -d --build`, then open `http://localhost:4951/preview`. Browse all UI views with mock or live data.
 
-    location / {
-        proxy_pass http://localhost:4951;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
 </details>
 
-Cloudflare Tunnel, Tailscale Funnel, and Pangolin also work.
-
-**3. Rebuild and connect:**
-
-```bash
-docker compose up -d
-```
-
-In Claude.ai, go to Settings > Integrations > Add MCP Server, enter `https://your-domain.com/mcp`. You'll be redirected to a login page — enter your `MCP_AUTH_PASSWORD` to authorize. The token persists across sessions.
-
-<details>
-<summary>How the auth flow works</summary>
-
-The MCP server implements MCP OAuth 2.1 using `@modelcontextprotocol/sdk`. No third-party auth provider needed — the password is checked directly against `MCP_AUTH_PASSWORD`.
-
-```
-Claude.ai → GET /mcp → 401 Unauthorized
-         → discovers OAuth metadata at /.well-known/oauth-authorization-server
-         → redirects user to /authorize → /login (password form)
-         → user enters password → /login/callback validates it
-         → issues authorization code → Claude.ai exchanges for bearer token
-         → GET/POST /mcp with Authorization: Bearer <token> → tools work
-```
-</details>
+**Uninstall:** `curl -fsSL https://raw.githubusercontent.com/jweingardt12/baseclaw/main/scripts/install.sh | bash -s -- --uninstall`
 
 ## Agent Orchestrators (OpenClaw)
 
