@@ -48,14 +48,14 @@ export function PastTradesView({ data, app, navigate }: { data: PastTradesData; 
         )}
 
         {trades.length === 0 ? (
-          <div className="rounded-md border bg-card p-4 text-center">
+          <div className="surface-card p-4 text-center">
             <p className="text-muted-foreground font-semibold">No trades for this season.</p>
           </div>
         ) : (
           <div className="space-y-3">
             {trades.map(function (t, i) {
               return (
-                <div key={i} className="rounded-md border bg-card p-4">
+                <div key={i} className="surface-card p-4">
                   <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] gap-3 items-start">
                     <div>
                       <p className="text-sm font-bold mb-2">{t.team1 + " sends:"}</p>

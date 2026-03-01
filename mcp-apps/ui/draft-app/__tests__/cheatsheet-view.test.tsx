@@ -18,7 +18,6 @@ describe("CheatsheetView", () => {
       />
     );
 
-    expect(screen.getByText("R10-12")).toBeInTheDocument();
     expect(screen.getByText("Rounds 10-12")).toBeInTheDocument();
     expect(screen.queryByText("rounds_10_12")).not.toBeInTheDocument();
   });

@@ -19,11 +19,11 @@ export function ScheduleView({ data }: { data: MlbScheduleData }) {
   return (
     <div className="space-y-3">
       {(data.games || []).length === 0 ? (
-        <div className="rounded-md border bg-card p-4 text-center">
+        <div className="surface-card p-4 text-center">
           <p className="text-muted-foreground font-semibold">No games scheduled for this date.</p>
         </div>
       ) : (
-        <div className="rounded-md border bg-card overflow-hidden">
+        <div className="surface-card overflow-hidden">
           <Table>
             <TableHeader>
               <TableRow>

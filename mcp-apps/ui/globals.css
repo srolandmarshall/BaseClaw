@@ -6,35 +6,7 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme {
-  --color-background: #ffffff;
-  --color-foreground: #0f172a;
-  --color-card: #f8fafc;
-  --color-card-foreground: #0f172a;
-  --color-popover: #f8fafc;
-  --color-popover-foreground: #0f172a;
-  --color-primary: #2563eb;
-  --color-primary-foreground: #ffffff;
-  --color-secondary: #f1f5f9;
-  --color-secondary-foreground: #0f172a;
-  --color-muted: #f1f5f9;
-  --color-muted-foreground: #64748b;
-  --color-accent: #f1f5f9;
-  --color-accent-foreground: #0f172a;
-  --color-destructive: #dc2626;
-  --color-destructive-foreground: #ffffff;
-  --color-border: #e2e8f0;
-  --color-input: #e2e8f0;
-  --color-ring: #2563eb;
   --radius: 0.375rem;
-
-  /* Semantic palette */
-  --color-surface-1: #ffffff;
-  --color-surface-2: #f8fafc;
-  --color-surface-3: #f1f5f9;
-  --color-accent-info: #2563eb;
-  --color-accent-success: #16a34a;
-  --color-accent-warning: #f59e0b;
-  --color-accent-risk: #dc2626;
 }
 
 /* Host variable overrides with light-dark() fallbacks.
@@ -177,6 +149,12 @@ button, a, [role="button"] {
 
 .preview-shell .mcp-app-content {
   gap: var(--app-space-2);
+}
+
+.surface-card {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
 }
 
 .mcp-app-content {

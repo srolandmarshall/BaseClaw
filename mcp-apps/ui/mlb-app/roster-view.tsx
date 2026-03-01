@@ -17,7 +17,7 @@ interface MlbRosterData {
 export function RosterView({ data, app, navigate }: { data: MlbRosterData; app?: any; navigate?: (data: any) => void }) {
   return (
     <div className="space-y-3">
-      <div className="rounded-md border bg-card overflow-hidden">
+      <div className="surface-card overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>

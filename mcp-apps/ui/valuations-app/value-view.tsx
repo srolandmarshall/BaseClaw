@@ -2,7 +2,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card"
 import { Badge } from "../components/ui/badge";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { BarChart3 } from "@/shared/icons";
-import { ZScoreExplainer, tierTextColor } from "../shared/z-score";
+import { ZScoreExplainer, tierTextColor, tierColor } from "../shared/z-score";
 import { IntelBadge } from "../shared/intel-badge";
 import { IntelPanel } from "../shared/intel-panel";
 import { PlayerName } from "../shared/player-name";
@@ -104,9 +104,9 @@ export function ValueView({ data, app, navigate }: { data: ValueData; app?: any;
       <div className="space-y-1.5">
         {(data.categories || []).map(function (c) {
           var pct = Math.max(0, Math.min(100, ((c.z_score + 2) / 6) * 100));
-          var barColor = c.z_score >= 2 ? "bg-green-500" : c.z_score >= 1 ? "bg-blue-500" : c.z_score >= 0 ? "bg-yellow-500" : "bg-red-500";
+          var barColor = tierColor(c.z_score);
           return (
-            <div key={c.category} className="rounded-md border bg-card p-2.5">
+            <div key={c.category} className="surface-card p-2.5">
               <div className="flex items-center justify-between mb-1.5">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-bold">{c.category}</span>

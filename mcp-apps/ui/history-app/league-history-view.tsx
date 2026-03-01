@@ -155,7 +155,7 @@ export function LeagueHistoryView({ data }: { data: { seasons: SeasonResult[] } 
 
       {/* Win % Trend Chart */}
       {sortedChartData.length > 1 && (
-        <div className="rounded-md border bg-card p-4">
+        <div className="surface-card p-4">
           <div className="flex items-center gap-2 mb-3">
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
             <span className="text-base font-bold">Win % by Season</span>

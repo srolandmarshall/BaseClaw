@@ -44,7 +44,7 @@ export function PastStandingsView({ data, app, navigate }: { data: PastStandings
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         )}
-        <div className="rounded-md border bg-card overflow-hidden">
+        <div className="surface-card overflow-hidden">
           <Table>
             <TableHeader>
               <TableRow>

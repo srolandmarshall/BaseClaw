@@ -20,7 +20,7 @@ export function StandingsView({ data }: { data: { divisions: MlbDivision[] } }) 
     <div className="space-y-3">
       {(data.divisions || []).map(function (div) {
         return (
-          <div key={div.division} className="rounded-md border bg-card overflow-hidden">
+          <div key={div.division} className="surface-card overflow-hidden">
             <div className="p-3 pb-1">
               <span className="text-base font-bold">{div.division}</span>
             </div>

@@ -241,7 +241,7 @@ function PreviewApp() {
             <span className="text-base leading-none">{sidebarOpen ? "\u2715" : "\u2630"}</span>
           </button>
           <div className="min-w-0">
-            <p className="text-xs font-medium text-muted-foreground leading-none">{activeGroup ? activeGroup.name : "Preview"}</p>
+            <p className="app-kicker leading-none">{activeGroup ? activeGroup.name : "Preview"}</p>
             <p className="text-sm font-semibold truncate">{view ? view.label : "Select a view"}</p>
           </div>
         </div>
@@ -357,7 +357,7 @@ function PreviewApp() {
             <Card size="sm" className="mb-4">
               <CardContent className="flex items-center justify-between gap-3 py-3">
                 <div className="min-w-0">
-                  <p className="text-xs font-medium text-muted-foreground text-primary">{activeGroup ? activeGroup.name : "Preview"}</p>
+                  <p className="app-kicker text-primary">{activeGroup ? activeGroup.name : "Preview"}</p>
                   <h2 className="truncate text-base font-bold">{view ? view.label : "Select a view"}</h2>
                 </div>
                 <div className="hidden sm:flex items-center gap-2">

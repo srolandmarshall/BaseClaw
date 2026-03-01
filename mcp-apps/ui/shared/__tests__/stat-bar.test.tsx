@@ -25,7 +25,7 @@ describe("StatBar", () => {
   it("applies variant color class", () => {
     const { container } = render(<StatBar value={50} variant="success" />);
     const bar = container.querySelector("[style]") as HTMLElement;
-    expect(bar.className).toContain("bg-green-500");
+    expect(bar.className).toContain("bg-sem-success");
   });
 
   it("applies custom barClassName", () => {

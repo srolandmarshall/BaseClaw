@@ -7,7 +7,7 @@ describe("TradeEvalView", () => {
     render(<TradeEvalView data={{} as any} />);
     expect(screen.getByText("Trade Evaluation")).toBeInTheDocument();
     expect(screen.getByText("N/A")).toBeInTheDocument();
-    expect(screen.getByText("+0.0")).toBeInTheDocument();
+    expect(screen.getAllByText("+0.0").length).toBeGreaterThan(0);
   });
 
   it("renders player value safely when value is a string", () => {

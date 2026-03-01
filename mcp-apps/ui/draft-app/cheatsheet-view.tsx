@@ -63,7 +63,7 @@ export function CheatsheetView({ data, app, navigate }: { data: CheatsheetData; 
             <div className="flex flex-wrap gap-2">
               {(targetMap as string[]).map(function (t) {
                 return (
-                  <div key={t} className="rounded-md border bg-card p-2 px-3 border-l-2 border-l-green-500">
+                  <div key={t} className="surface-card p-2 px-3 border-l-2 border-l-green-500">
                     <span className="text-sm font-semibold"><PlayerName name={t} app={app} navigate={navigate} context="draft" /></span>
                   </div>
                 );
@@ -90,7 +90,7 @@ export function CheatsheetView({ data, app, navigate }: { data: CheatsheetData; 
                   <div className="flex flex-wrap gap-1.5">
                     {players.map(function (t) {
                       return (
-                        <div key={t} className="rounded-md border bg-card p-1.5 px-2.5 border-l-2 border-l-green-500">
+                        <div key={t} className="surface-card p-1.5 px-2.5 border-l-2 border-l-green-500">
                           <span className="text-xs font-semibold"><PlayerName name={t} app={app} navigate={navigate} context="draft" /></span>
                         </div>
                       );
@@ -116,7 +116,7 @@ export function CheatsheetView({ data, app, navigate }: { data: CheatsheetData; 
             <div className="flex flex-wrap gap-2">
               {(data.avoid || []).map(function (name) {
                 return (
-                  <div key={name} className="rounded-md border bg-card p-1.5 px-2.5 border-l-2 border-l-yellow-500">
+                  <div key={name} className="surface-card p-1.5 px-2.5 border-l-2 border-l-yellow-500">
                     <span className="text-xs font-semibold text-yellow-600 dark:text-yellow-400">{name}</span>
                   </div>
                 );

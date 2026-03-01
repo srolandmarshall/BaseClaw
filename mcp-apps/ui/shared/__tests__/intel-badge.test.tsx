@@ -22,7 +22,7 @@ describe("IntelBadge", () => {
     render(<IntelBadge intel={{ statcast: { quality_tier: "elite" } }} />);
     const badge = screen.getByText("elite");
     expect(badge).toBeInTheDocument();
-    expect(badge.className).toContain("bg-[#d4a017]");
+    expect(badge.className).toContain("bg-primary");
   });
 
   it("renders hot/cold icon with correct color class", () => {

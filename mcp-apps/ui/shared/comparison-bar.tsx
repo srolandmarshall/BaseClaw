@@ -8,9 +8,9 @@ interface ComparisonBarProps {
 }
 
 const RESULT_STYLES = {
-  win: { leftBg: "bg-green-500", leftText: "text-green-600 dark:text-green-400", rightText: "text-red-500" },
-  loss: { leftBg: "bg-red-500/60", leftText: "text-red-500", rightText: "text-green-600 dark:text-green-400" },
-  tie: { leftBg: "bg-yellow-500/60", leftText: "text-yellow-600 dark:text-yellow-400", rightText: "text-yellow-600 dark:text-yellow-400" },
+  win: { leftBg: "bg-sem-success", leftText: "text-sem-success", rightText: "text-sem-risk" },
+  loss: { leftBg: "bg-sem-risk/60", leftText: "text-sem-risk", rightText: "text-sem-success" },
+  tie: { leftBg: "bg-sem-warning/60", leftText: "text-sem-warning", rightText: "text-sem-warning" },
 };
 
 export function ComparisonBar({ label, leftValue, rightValue, result, leftLabel, rightLabel }: ComparisonBarProps) {
@@ -31,8 +31,8 @@ export function ComparisonBar({ label, leftValue, rightValue, result, leftLabel,
           {rightValue}{rightLabel ? " " + rightLabel : ""}
         </span>
       </div>
-      <div className="h-2 rounded-sm overflow-hidden bg-muted">
-        <div className={"h-full rounded-sm transition-all " + colors.leftBg} style={{ width: leftPct + "%" }} />
+      <div className="h-2 rounded-full overflow-hidden bg-muted">
+        <div className={"h-full rounded-full transition-all " + colors.leftBg} style={{ width: leftPct + "%" }} />
       </div>
     </div>
   );

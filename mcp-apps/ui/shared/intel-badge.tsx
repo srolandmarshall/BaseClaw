@@ -35,24 +35,24 @@ export interface PlayerIntel {
   };
 }
 
+var TIER_STYLES: Record<string, { bg: string; text: string }> = {
+  elite: { bg: "bg-primary", text: "text-primary" },
+  strong: { bg: "bg-sem-success", text: "text-sem-success" },
+  average: { bg: "bg-sem-neutral", text: "text-sem-neutral" },
+  below: { bg: "bg-sem-warning", text: "text-sem-warning" },
+  poor: { bg: "bg-sem-risk", text: "text-sem-risk" },
+};
+
+var TIER_FALLBACK = { bg: "bg-muted-foreground/30", text: "text-muted-foreground" };
+
 export function qualityColor(tier: string | null | undefined): string {
-  if (!tier) return "bg-muted-foreground/30";
-  if (tier === "elite") return "bg-sem-warning";
-  if (tier === "strong") return "bg-sem-success";
-  if (tier === "average") return "bg-sem-neutral";
-  if (tier === "below") return "bg-sem-warning";
-  if (tier === "poor") return "bg-sem-risk";
-  return "bg-muted-foreground/30";
+  if (!tier) return TIER_FALLBACK.bg;
+  return (TIER_STYLES[tier] || TIER_FALLBACK).bg;
 }
 
 export function qualityTextColor(tier: string | null | undefined): string {
-  if (!tier) return "text-muted-foreground";
-  if (tier === "elite") return "text-sem-warning";
-  if (tier === "strong") return "text-sem-success";
-  if (tier === "average") return "text-sem-neutral";
-  if (tier === "below") return "text-sem-warning";
-  if (tier === "poor") return "text-sem-risk";
-  return "text-muted-foreground";
+  if (!tier) return TIER_FALLBACK.text;
+  return (TIER_STYLES[tier] || TIER_FALLBACK).text;
 }
 
 export function hotColdIcon(status: string | null | undefined): string {

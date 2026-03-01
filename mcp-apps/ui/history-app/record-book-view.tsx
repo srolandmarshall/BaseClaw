@@ -81,7 +81,7 @@ export function RecordBookView({ data }: { data: RecordBookData }) {
         </TabsContent>
 
         <TabsContent value="careers">
-          <div className="rounded-md border bg-card overflow-hidden">
+          <div className="surface-card overflow-hidden">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -131,7 +131,7 @@ export function RecordBookView({ data }: { data: RecordBookData }) {
         </TabsContent>
 
         <TabsContent value="playoffs">
-          <div className="rounded-md border bg-card overflow-hidden">
+          <div className="surface-card overflow-hidden">
             <Table>
               <TableHeader>
                 <TableRow>
