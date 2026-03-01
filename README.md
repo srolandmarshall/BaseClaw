@@ -4,9 +4,9 @@
 
 # BaseClaw
 
-Fantasy Baseball MCP Server for Claude. Manage your Yahoo Fantasy Baseball league through natural conversation or let an AI agent run it autonomously — optimize lineups, analyze trades, scout opponents, find waiver pickups, and make roster moves, all backed by real-time data and rendered in rich inline UIs. Works with Claude Code, Claude Desktop, Claude.ai, and agent orchestrators like [OpenClaw](https://openclaw.com) for fully hands-free team management.
+Your fantasy baseball team, managed by AI.
 
-**Built with:** [yahoo_fantasy_api](https://github.com/uberfastman/yahoo_fantasy_api) | [pybaseball](https://github.com/jldbc/pybaseball) | [MLB-StatsAPI](https://github.com/toddrob99/MLB-StatsAPI) | [MCP Apps (ext-apps)](https://github.com/anthropics/model-context-protocol/tree/main/packages/ext-apps) | [Playwright](https://playwright.dev/) | [MCP SDK](https://github.com/modelcontextprotocol/typescript-sdk)
+BaseClaw is an MCP server that gives Claude full access to your Yahoo Fantasy Baseball league — your roster, the waiver wire, Statcast data, trade analytics, and 113 tools to act on it all. Ask questions in plain English or let an autonomous agent run your team on autopilot.
 
 ## Table of Contents
 
@@ -22,41 +22,9 @@ Fantasy Baseball MCP Server for Claude. Manage your Yahoo Fantasy Baseball leagu
 
 ## What It Does
 
-This MCP server gives Claude direct access to your Yahoo Fantasy Baseball league, real-time MLB data, and advanced analytics. Instead of switching between Yahoo's app, Baseball Savant, Reddit, and spreadsheets, you just talk to Claude — or let an AI agent handle it all automatically.
+> "Who should I pick up this week to help my batting average?"
 
-**Two ways to use it:**
-
-**Conversational** — Ask Claude directly:
-- "Who should I pick up this week to help my batting average?"
-- "Is it worth trading Soto for two mid-tier pitchers?"
-- "Set my lineup for today — bench anyone without a game"
-- "Who are the best streaming pitchers for next week?"
-
-**Autonomous** — Connect to an agent orchestrator like [OpenClaw](https://openclaw.com) and your team manages itself:
-- Daily: auto-sets optimal lineups, checks injuries, handles IL moves
-- Weekly: scouts your matchup opponent, finds waiver wire targets, identifies trade opportunities
-- On schedule: cron jobs trigger the agent at times you choose — no manual interaction needed
-- Smart decisions: the agent follows configurable rules — auto-executes safe moves (lineup optimization), reports risky ones (trades) for your approval
-
-### How It Works
-
-Claude calls the MCP tools to pull live data, run analysis, and take action on your behalf. Behind the scenes:
-
-1. **Yahoo Fantasy API** — Your roster, standings, matchups, free agents, transactions, and league settings come from Yahoo's OAuth API in real time. Every tool call fetches current data, not cached snapshots.
-
-2. **Analytics engine** — Z-score valuations tuned to your league's stat categories, powered by consensus projections (Steamer + ZiPS + Depth Charts blended) auto-fetched from FanGraphs, with park factor adjustments, rest-of-season valuation tracking, and in-season blending of projections + live stats weighted by games played. Category gap analysis, punt strategy advisor, playoff path planner, trade package builder, FAAB bid recommendations, and a trade finder that scans every team for complementary deals.
-
-3. **Player intelligence** — Every player surface is enriched with Statcast data (xwOBA, xERA, exit velocity, barrel rate, percentile rankings, pitch arsenal, batted ball profile), platoon splits (vs LHP/RHP), historical Statcast comparisons, arsenal change detection, recent trend splits (7/14/30 day), plate discipline metrics (FanGraphs), Reddit sentiment from r/fantasybaseball, and MLB transaction alerts. Expensive API calls are cached with configurable TTL. Before the season starts, Savant data automatically falls back to the prior year so intel surfaces stay populated during spring training.
-
-4. **Browser automation** — Write operations (add, drop, trade, lineup changes) use Playwright to automate the Yahoo Fantasy website directly, since Yahoo's API no longer grants write scope to new developer apps. Read operations still use the fast OAuth API.
-
-5. **Inline UI apps** — Tool results aren't just text. Nine Preact + Tailwind + Recharts HTML apps with 62 views render interactive tables, charts, radar plots, heatmaps, and dashboards directly inside Claude's response using MCP Apps (`@modelcontextprotocol/ext-apps`).
-
-6. **Workflow tools for agents** — Eleven aggregated tools (`yahoo_morning_briefing`, `yahoo_game_day_manager`, `yahoo_trade_pipeline`, etc.) each combine 5-7+ individual API calls server-side and return concise, decision-ready output in a single tool call. Designed for autonomous agents that need to minimize token usage and tool call count — a full daily routine takes just 2-3 tool calls instead of 15+.
-
-### Data Flow
-
-When you ask Claude a question, here's what happens:
+Just ask. Claude pulls your roster, checks your weak categories, scores every free agent, and recommends the best pickup — with specific stat reasoning.
 
 ```
 You: "Should I drop Player X for Player Y?"
@@ -72,7 +40,36 @@ Claude synthesizes all 5 results and gives you a recommendation
 with specific category-level reasoning.
 ```
 
-Claude decides which tools to call and in what order based on your question. Complex questions may chain 3-8 tool calls. Simple lookups ("show my roster") are a single call.
+More things you can ask:
+- "Is it worth trading Soto for two mid-tier pitchers?"
+- "Set my lineup for today — bench anyone without a game"
+- "Who are the best streaming pitchers for next week?"
+- "Scout my opponent this week — where can I beat them?"
+
+Or go fully autonomous. Connect to an agent orchestrator like [OpenClaw](https://openclaw.com) and your team manages itself:
+- Daily: auto-sets optimal lineups, checks injuries, handles IL moves
+- Weekly: scouts your matchup opponent, finds waiver wire targets, identifies trade opportunities
+- On schedule: cron jobs trigger the agent at times you choose — no manual interaction needed
+- Smart decisions: the agent follows configurable rules — auto-executes safe moves (lineup optimization), reports risky ones (trades) for your approval
+
+Claude decides which tools to call based on your question. Complex questions chain 3-8 tool calls. Simple lookups are a single call.
+
+<details>
+<summary><strong>Under the Hood</strong></summary>
+
+1. **Yahoo Fantasy API** — Your roster, standings, matchups, free agents, transactions, and league settings come from Yahoo's OAuth API in real time. Every tool call fetches current data, not cached snapshots.
+
+2. **Analytics engine** — Z-score valuations tuned to your league's stat categories, powered by consensus projections (Steamer + ZiPS + Depth Charts blended) auto-fetched from FanGraphs, with park factor adjustments, rest-of-season valuation tracking, and in-season blending of projections + live stats weighted by games played. Category gap analysis, punt strategy advisor, playoff path planner, trade package builder, FAAB bid recommendations, and a trade finder that scans every team for complementary deals.
+
+3. **Player intelligence** — Every player surface is enriched with Statcast data (xwOBA, xERA, exit velocity, barrel rate, percentile rankings, pitch arsenal, batted ball profile), platoon splits (vs LHP/RHP), historical Statcast comparisons, arsenal change detection, recent trend splits (7/14/30 day), plate discipline metrics (FanGraphs), Reddit sentiment from r/fantasybaseball, and MLB transaction alerts. Expensive API calls are cached with configurable TTL. Before the season starts, Savant data automatically falls back to the prior year so intel surfaces stay populated during spring training.
+
+4. **Browser automation** — Write operations (add, drop, trade, lineup changes) use Playwright to automate the Yahoo Fantasy website directly, since Yahoo's API no longer grants write scope to new developer apps. Read operations still use the fast OAuth API.
+
+5. **Inline UI apps** — Tool results aren't just text. Nine Preact + Tailwind + Recharts HTML apps with 62 views render interactive tables, charts, radar plots, heatmaps, and dashboards directly inside Claude's response using MCP Apps (`@modelcontextprotocol/ext-apps`).
+
+6. **Workflow tools for agents** — Eleven aggregated tools (`yahoo_morning_briefing`, `yahoo_game_day_manager`, `yahoo_trade_pipeline`, etc.) each combine 5-7+ individual API calls server-side and return concise, decision-ready output in a single tool call. Designed for autonomous agents that need to minimize token usage and tool call count — a full daily routine takes just 2-3 tool calls instead of 15+.
+
+</details>
 
 ## Quick Start
 
@@ -157,80 +154,70 @@ Set `ENABLE_PREVIEW=true` in `.env`, rebuild with `docker compose up -d --build`
 
 ## Agent Orchestrators (OpenClaw)
 
-Connect BaseClaw to an agent orchestrator and your fantasy team manages itself. The agent sets optimal lineups every morning, monitors injuries, finds waiver wire pickups, scouts opponents, and identifies trade opportunities — all on autopilot with no manual interaction required.
+Your team manages itself. Connect BaseClaw to an agent orchestrator and it becomes an autonomous fantasy GM — setting lineups every morning, monitoring injuries, scouting opponents, finding waiver pickups, and identifying trades, all on autopilot.
 
-Any AI agent orchestrator that supports MCP can use BaseClaw (OpenClaw, LangChain, CrewAI, etc.). The setup below uses [OpenClaw](https://openclaw.com) as an example.
+Any MCP-compatible orchestrator works (OpenClaw, LangChain, CrewAI, etc.). The examples below use [OpenClaw](https://openclaw.com).
 
 ### What the Agent Does
 
-The agent operates as an autonomous fantasy GM with a daily and weekly routine:
+**Every morning (9am):** Calls `yahoo_morning_briefing` + `yahoo_auto_lineup` — gets the full picture (injuries, matchup scores, category strategy, waiver targets), optimizes your lineup, and executes critical moves (IL stints, pending trade responses). You get a 2-3 sentence summary.
 
-**Every morning (9am):**
-1. Calls `yahoo_morning_briefing` — gets injuries, lineup issues, live matchup scores, category strategy, opponent moves, and top waiver targets in one call
-2. Calls `yahoo_auto_lineup` — benches off-day players, starts active bench players, flags injured starters
-3. Executes any critical action items (IL moves, pending trade responses)
-4. Reports a 2-3 sentence summary of actions taken
+**Pre-lock (10:30am):** Calls `yahoo_game_day_manager` — weather risks, late scratches, streaming recommendations. Last-minute adjustments before lineups lock.
 
-**Pre-lock check (10:30am):**
-1. Calls `yahoo_game_day_manager` — schedule, weather risks, late scratches, lineup optimization, and streaming recommendations
-2. Makes last-minute adjustments before lineups lock at first pitch
+**Monday (8am):** Calls `yahoo_league_landscape` + `yahoo_matchup_strategy` — standings, playoff projections, and a category-by-category game plan for this week's opponent.
 
-**Every Monday (8am):**
-1. Calls `yahoo_league_landscape` — standings, playoff projections, rival activity, trade opportunities
-2. Calls `yahoo_matchup_strategy` — category-by-category game plan for this week's opponent
-3. Reports your opponent, which categories to target/concede, and top recommended actions
+**Tuesday (8pm):** Calls `yahoo_waiver_deadline_prep` — ranks candidates with FAAB bids and simulated category impact. Submits top claims automatically.
 
-**Tuesday evening (8pm):**
-1. Calls `yahoo_waiver_deadline_prep` — ranks waiver candidates with FAAB bids and simulated category impact
-2. Submits top claims if they show strong net improvement
+**Thursday (9am):** Calls `yahoo_streaming` — finds two-start pitchers and favorable matchups. Adds the best option if it helps.
 
-**Thursday (9am):**
-1. Calls `yahoo_streaming` — finds two-start pitchers and favorable streaming matchups
-2. Executes the top streaming add if it improves counting stats
+**Saturday (9am):** Calls `yahoo_roster_health_check` — audits for injured starters not on IL, bust candidates, and off-day issues.
 
-**Weekend (Saturday 9am):**
-1. Calls `yahoo_roster_health_check` — audits for injured starters, IL-eligible players not on IL, bust candidates, off-day issues
-2. Reports any critical or warning issues found
+**Sunday (9pm):** Calls `yahoo_weekly_digest` — matchup result, standings movement, key performers. Produces a narrative recap.
 
-**End of week (Sunday 9pm):**
-1. Calls `yahoo_weekly_digest` — matchup result, transactions, key performers, standings movement
-2. Produces a prose narrative summary of the week
-
-**Monthly (1st of month):**
-1. Calls `yahoo_season_checkpoint` — rank, playoff probability, category trajectory, trade targets
-2. Reports strategic assessment with improving/declining categories and recommended moves
+**Monthly (1st):** Calls `yahoo_season_checkpoint` — rank, playoff probability, category trajectory, and trade targets.
 
 ### Decision Tiers
 
-The agent follows configurable rules about what it can do autonomously vs. what requires your approval:
-
 | Tier | Actions | Agent Behavior |
 |------|---------|----------------|
-| **Auto-execute** | Lineup optimization, IL moves | Safe and idempotent — the agent acts immediately |
-| **Execute + report** | Waiver pickups, streaming adds, obvious drops | High-confidence moves — the agent acts and tells you what it did |
-| **Report + wait** | Trades, dropping regular starters, large FAAB bids | The agent recommends but waits for your approval |
+| **Auto-execute** | Lineup optimization, IL moves | Safe and idempotent — acts immediately |
+| **Execute + report** | Waiver pickups, streaming adds, obvious drops | High-confidence — acts and tells you what it did |
+| **Report + wait** | Trades, dropping starters, large FAAB bids | Recommends but waits for your approval |
 
-These tiers are defined in the agent persona file (`AGENTS.md`) and can be customized to match your comfort level.
+Tiers are defined in `AGENTS.md` and customizable to your comfort level.
 
-### Setup with OpenClaw
+### Cron Schedule
 
-The one-command installer handles OpenClaw configuration automatically if it detects OpenClaw on your system. To set it up manually:
+All times Eastern, configurable in `openclaw-cron-examples.json`:
 
-**1. Ensure the Docker container is running:**
+| Schedule | Task | Tools Called |
+|----------|------|-------------|
+| Daily 9am | Lineup + briefing | `yahoo_morning_briefing` + `yahoo_auto_lineup` |
+| Daily 10:30am | Pre-lock check | `yahoo_game_day_manager` |
+| Monday 8am | Matchup plan | `yahoo_league_landscape` + `yahoo_matchup_strategy` |
+| Tuesday 8pm | Waiver deadline prep | `yahoo_waiver_deadline_prep` |
+| Thursday 9am | Streaming check | `yahoo_streaming` |
+| Saturday 9am | Roster audit | `yahoo_roster_health_check` |
+| Sunday 9pm | Weekly digest | `yahoo_weekly_digest` |
+| 1st of month 10am | Season checkpoint | `yahoo_season_checkpoint` |
+
+### Workflow Tools
+
+Eleven aggregated tools designed for autonomous agents. Each combines 5-7+ individual API calls server-side and returns decision-ready output in a single call. Available to all clients (Claude Code, Claude.ai, orchestrators). See the full list in [MCP Tools > Workflows](#mcp-tools).
+
+<details>
+<summary><strong>Setup with OpenClaw</strong></summary>
+
+The one-command installer handles OpenClaw configuration automatically. To set it up manually:
 
 ```bash
 docker compose up -d
-```
-
-**2. Copy the config files:**
-
-```bash
 cp openclaw-config.yaml /path/to/openclaw/config/
 cp AGENTS.md /path/to/openclaw/config/
 cp openclaw-cron-examples.json /path/to/openclaw/config/
 ```
 
-**3. Edit `openclaw-config.yaml`** — the default connects via stdio through Docker:
+Edit `openclaw-config.yaml`:
 
 ```yaml
 agents:
@@ -246,33 +233,17 @@ agents:
     schedules: ./openclaw-cron-examples.json
 ```
 
-Key configuration:
-- **`persona: ./AGENTS.md`** — The agent persona teaches the agent league-specific strategy, daily/weekly routines, which workflow tools to call, and the decision tiers above. Customize this file to adjust the agent's behavior.
-- **`ENABLE_WRITE_OPS: "true"`** — Required for the agent to make roster moves. Without this, the agent can only read data and report recommendations.
-- **`schedules`** — Points to the cron job definitions. Edit `openclaw-cron-examples.json` to change times, timezone, or add/remove scheduled tasks.
+- **`persona: ./AGENTS.md`** — Agent persona with league strategy, daily/weekly routines, workflow tools, and decision tiers. Customize to adjust behavior.
+- **`ENABLE_WRITE_OPS: "true"`** — Required for roster moves. Without it, the agent can only read and recommend.
+- **`schedules`** — Cron job definitions. Edit times, timezone, or tasks in `openclaw-cron-examples.json`.
 
-**4. Start the agent:**
+Start the agent:
 
 ```bash
 openclaw start
 ```
 
-### Cron Schedule
-
-The default schedule (all times Eastern, configurable):
-
-| Schedule | Task | Tools Called |
-|----------|------|-------------|
-| Daily 9am | Lineup + briefing | `yahoo_morning_briefing` + `yahoo_auto_lineup` |
-| Daily 10:30am | Pre-lock check | `yahoo_game_day_manager` |
-| Monday 8am | Matchup plan | `yahoo_league_landscape` + `yahoo_matchup_strategy` |
-| Tuesday 8pm | Waiver deadline prep | `yahoo_waiver_deadline_prep` |
-| Thursday 9am | Streaming check | `yahoo_streaming` |
-| Saturday 9am | Roster audit | `yahoo_roster_health_check` |
-| Sunday 9pm | Weekly digest | `yahoo_weekly_digest` |
-| 1st of month 10am | Season checkpoint | `yahoo_season_checkpoint` |
-
-Each cron job runs in an isolated session, calls the specified tools, and produces a concise report. Edit `openclaw-cron-examples.json` to customize:
+Example cron job:
 
 ```json
 {
@@ -286,41 +257,28 @@ Each cron job runs in an isolated session, calls the specified tools, and produc
 }
 ```
 
-### Workflow Tools
+</details>
 
-Eleven aggregated tools designed for autonomous agents. Each combines 5-7+ individual API calls server-side and returns concise, decision-ready output — minimizing token usage and tool call count. These tools are available to all clients (Claude Code, Claude.ai, agent orchestrators).
+<details>
+<summary><strong>Agent Persona</strong></summary>
 
-| Tool | Aggregates | Use Case |
-|------|-----------|----------|
-| `yahoo_morning_briefing` | injury_report + lineup_optimize + matchup + strategy + whats_new + waiver_analyze x2 | Daily situational awareness |
-| `yahoo_league_landscape` | standings + season_pace + power_rankings + league_pulse + transactions + trade_finder + scoreboard | Weekly strategic planning |
-| `yahoo_roster_health_check` | injury_report + lineup_optimize + roster + intel/busts | Roster audit |
-| `yahoo_waiver_recommendations` | category_check + waiver_analyze x2 + roster | Decision-ready waiver picks |
-| `yahoo_auto_lineup` | injury_report + lineup_optimize (apply) | Daily lineup optimization |
-| `yahoo_trade_analysis` | value + trade_eval + intel/player | Trade evaluation by name |
-| `yahoo_game_day_manager` | schedule + weather + injury_report + lineup_optimize + streaming | Game-day pipeline |
-| `yahoo_waiver_deadline_prep` | category_check + waiver_analyze x2 + category_simulate + injury_report | Pre-deadline waiver prep |
-| `yahoo_trade_pipeline` | trade_finder + value + category_simulate + trade_eval | End-to-end trade search |
-| `yahoo_weekly_digest` | standings + my_matchup + transactions + whats_new + roster_stats + achievements | Weekly summary narrative |
-| `yahoo_season_checkpoint` | standings + season_pace + punt_advisor + playoff_planner + category_trends + trade_finder | Monthly strategic assessment |
+The `AGENTS.md` file defines the agent's identity and behavior:
 
-### Agent Persona
-
-The `AGENTS.md` file defines the agent's identity and behavior. It includes:
-
-- **League awareness** — On first session, the agent learns your league's format, team count, scoring categories, and roster rules
-- **Strategy principles** — Target close categories, concede lost causes, stream pitchers for counting stats, monitor closer situations, trade from surplus to improve weaknesses
-- **Season phase strategy** — Early (build depth, stream aggressively), mid (trade for balance, buy low), late (playoff positioning, closer monitoring)
-- **Multi-step decision trees** — Injury response pipelines, trade search workflows, waiver deadline claim chains
+- **League awareness** — Learns your format, team count, scoring categories, and roster rules on first session
+- **Strategy principles** — Target close categories, concede lost causes, stream pitchers, monitor closers, trade from surplus
+- **Season phases** — Early (build depth, stream aggressively), mid (trade for balance, buy low), late (playoff positioning)
+- **Decision trees** — Injury response pipelines, trade search workflows, waiver deadline claim chains
 - **FAAB management** — Budget pacing, bid philosophy, emergency reserves
-- **Competitive intelligence** — Track rival managers' activity, react to opponent moves, check standings implications before trades
-- **Token efficiency** — Always use workflow tools over individual tools when possible, keep reports concise
+- **Competitive intelligence** — Track rival activity, react to opponent moves, check standings before trades
+- **Token efficiency** — Workflow tools over individual tools, concise reports
 
-You can customize `AGENTS.md` to adjust the agent's strategy, risk tolerance, or reporting style.
+Customize `AGENTS.md` to adjust strategy, risk tolerance, or reporting style.
+
+</details>
 
 ### Health Check
 
-The server exposes a `GET /health` endpoint (unauthenticated) that returns `{ ok: true, writes_enabled: bool }` for monitoring uptime and verifying write operations are enabled.
+`GET /health` returns `{ ok: true, writes_enabled: bool }` — unauthenticated, for uptime monitoring.
 
 ## MCP Tools
 
@@ -584,6 +542,8 @@ The `./yf` helper script provides direct CLI access to all functionality:
 - **Intelligence**: Statcast data with SIERA (expected ERA), platoon splits, arsenal change detection, batted ball profiles, and historical comparison — all cached with configurable TTL
 - **MCP Apps**: Inline HTML UIs (Preact + Tailwind + Recharts) rendered directly in Claude via `@modelcontextprotocol/ext-apps`
 - **Workflow tools**: 11 aggregated endpoints for autonomous agents — each combines 5-7+ API calls server-side to minimize token usage
+
+**Built with:** [yahoo_fantasy_api](https://github.com/uberfastman/yahoo_fantasy_api) | [pybaseball](https://github.com/jldbc/pybaseball) | [MLB-StatsAPI](https://github.com/toddrob99/MLB-StatsAPI) | [MCP Apps (ext-apps)](https://github.com/anthropics/model-context-protocol/tree/main/packages/ext-apps) | [Playwright](https://playwright.dev/) | [MCP SDK](https://github.com/modelcontextprotocol/typescript-sdk)
 
 ## Environment Variables
 
