@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="banner.png" alt="BaseClaw" width="100%" />
+</p>
+
 # BaseClaw
 
 Fantasy Baseball MCP Server for Claude. Manage your Yahoo Fantasy Baseball league through natural conversation or let an AI agent run it autonomously — optimize lineups, analyze trades, scout opponents, find waiver pickups, and make roster moves, all backed by real-time data and rendered in rich inline UIs. Works with Claude Code, Claude Desktop, Claude.ai, and agent orchestrators like [OpenClaw](https://openclaw.com) for fully hands-free team management.
