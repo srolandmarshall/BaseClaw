@@ -130,7 +130,7 @@ export function TradeEvalView({ data, app, navigate }: { data: TradeEvalData; ap
                   {grade}
                 </span>
               </div>
-              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={handleCopy}>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleCopy}>
                 {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
               </Button>
             </div>

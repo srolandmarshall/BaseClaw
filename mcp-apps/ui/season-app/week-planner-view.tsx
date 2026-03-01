@@ -122,7 +122,7 @@ export function WeekPlannerView({ data }: { data: WeekPlannerData }) {
                 <div style={{ fontSize: "var(--app-text-lg)", fontWeight: 700, lineHeight: 1.2, fontVariantNumeric: "tabular-nums" }}>
                   {count}
                 </div>
-                <div style={{ fontSize: "0.65rem", opacity: 0.7 }}>
+                <div style={{ fontSize: "var(--app-text-xs)", opacity: 0.7 }}>
                   {dayLabel(d)}
                 </div>
               </div>
@@ -153,7 +153,7 @@ export function WeekPlannerView({ data }: { data: WeekPlannerData }) {
         <p className="text-xs text-muted-foreground">{data.start_date} to {data.end_date}</p>
       </div>
 
-      <div className="w-full overflow-x-auto">
+      <div className="w-full overflow-x-auto mcp-app-scroll-x touch-pan-x">
         <div className="min-w-max">
           <table className="w-full text-sm">
             <thead>
@@ -182,7 +182,7 @@ export function WeekPlannerView({ data }: { data: WeekPlannerData }) {
                       <Badge variant="outline" className="text-xs">{p.position}</Badge>
                     </td>
                     <td className="py-1.5 pr-2 text-xs text-muted-foreground">
-                      <span className="flex items-center" style={{ gap: "4px" }}>
+                      <span className="flex items-center gap-1">
                         <TeamLogo abbrev={p.mlb_team} />
                         {p.mlb_team}
                       </span>

@@ -42,7 +42,7 @@ function PlayerRow({ player, showFind, onFind, readyToActivate, loading, app, na
         </Badge>
       )}
       {showFind && onFind && (
-        <Button variant="outline" size="sm" onClick={onFind} disabled={loading} className="h-6 text-xs px-2 gap-1">
+        <Button variant="outline" size="sm" onClick={onFind} disabled={loading} className="h-8 text-xs px-2 gap-1">
           <Search className="h-3 w-3" />
           Find FA
         </Button>

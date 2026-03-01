@@ -156,7 +156,7 @@ export function TransactionsView({ data }: { data: TransactionsData }) {
                             </div>
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
-                            <span className="flex items-center" style={{ gap: "4px" }}>
+                            <span className="flex items-center gap-1">
                               <TeamLogo abbrev={t.team} />
                               {t.team || "-"}
                             </span>

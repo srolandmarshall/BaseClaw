@@ -161,13 +161,13 @@ export function RankingsView({ data, app, navigate }: { data: RankingsData; app:
                   <TableRow>
                     <TableCell className="font-mono text-xs">{p.rank}</TableCell>
                     <TableCell className="font-medium">
-                      <span className="flex items-center" style={{ gap: "4px" }}>
+                      <span className="flex items-center gap-1">
                         <PlayerName name={p.name} mlbId={p.mlb_id} app={app} navigate={navigate} context="default" />
                         {p.intel && <IntelBadge intel={p.intel} size="sm" />}
                       </span>
                     </TableCell>
                     <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
-                      <span className="flex items-center" style={{ gap: "4px" }}>
+                      <span className="flex items-center gap-1">
                         <TeamLogo abbrev={p.team} />
                         {p.team || "-"}
                       </span>

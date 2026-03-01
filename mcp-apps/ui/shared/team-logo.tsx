@@ -23,7 +23,7 @@ export function TeamLogo({ abbrev, name, teamId, size = 20 }: TeamLogoProps) {
       alt={abbrev || name || ""}
       width={size}
       height={size}
-      style={{ display: "inline", flexShrink: 0 }}
+      className="inline shrink-0"
     />
   );
 }

@@ -20,7 +20,7 @@ export function RefreshButton({ app, toolName, toolArgs, navigate }: RefreshButt
   };
 
   return (
-    <Button variant="ghost" size="sm" onClick={handleRefresh} disabled={loading} className="h-7 w-7 p-0">
+    <Button variant="ghost" size="sm" onClick={handleRefresh} disabled={loading} className="h-8 w-8 p-0">
       <RefreshCw className={"h-3.5 w-3.5" + (loading ? " animate-spin" : "")} />
     </Button>
   );

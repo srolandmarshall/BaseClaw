@@ -222,7 +222,7 @@ export function WaiverAnalyzeView({ data, app, navigate }: { data: WaiverData; a
                 <React.Fragment key={playerId || i}>
                 <TableRow className={i < 3 ? "bg-sem-success-subtle" : ""}>
                   <TableCell className="font-medium">
-                    <span className="flex items-center" style={{ gap: "4px" }}>
+                    <span className="flex items-center gap-1">
                       {i === 0 && <span className="text-green-600 mr-0.5">&#9733;</span>}
                       <PlayerName name={p.name} playerId={p.pid || p.player_id} mlbId={p.mlb_id} app={app} navigate={navigate} context="waivers" />
                       {p.intel && <IntelBadge intel={p.intel} size="sm" />}

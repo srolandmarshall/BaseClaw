@@ -81,8 +81,8 @@ export function RosterView({ data, app, navigate }: { data: { players: Player[];
                     <Badge variant="secondary" className="font-mono text-xs font-bold">{p.position || "?"}</Badge>
                   </TableCell>
                   <TableCell className="font-medium">
-                    <span className="flex items-center" style={{ gap: "4px" }}>
-                      {logoUrl && <img src={logoUrl} alt={p.team || ""} width={16} height={16} style={{ display: "inline", flexShrink: 0 }} />}
+                    <span className="flex items-center gap-1">
+                      {logoUrl && <img src={logoUrl} alt={p.team || ""} width={16} height={16} className="inline shrink-0" />}
                       <PlayerName name={p.name} playerId={p.player_id} mlbId={p.mlb_id} app={app} navigate={navigate} context="roster" />
                       {p.intel && <IntelBadge intel={p.intel} size="sm" />}
                     </span>

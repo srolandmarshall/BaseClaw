@@ -76,14 +76,14 @@ export function StreamingView({ data, app, navigate }: { data: StreamingData; ap
             {(data.pitchers || []).map((p, i) => (
               <TableRow key={p.player_id} className={i === 0 ? "bg-primary/5" : ""}>
                 <TableCell className="font-medium">
-                  <span className="flex items-center" style={{ gap: "4px" }}>
+                  <span className="flex items-center gap-1">
                     <PlayerName name={p.name} playerId={p.player_id} mlbId={p.mlb_id} app={app} navigate={navigate} context="free-agents" />
                     {p.intel && <IntelBadge intel={p.intel} size="sm" />}
                   </span>
                 </TableCell>
                 <TableCell className="text-sm">
-                  <span className="flex items-center" style={{ gap: "4px" }}>
-                    <img src={teamLogoFromAbbrev(p.team)} alt={p.team} width={16} height={16} style={{ display: "inline", flexShrink: 0 }} />
+                  <span className="flex items-center gap-1">
+                    <img src={teamLogoFromAbbrev(p.team)} alt={p.team} width={16} height={16} className="inline shrink-0" />
                     {p.team}
                   </span>
                 </TableCell>

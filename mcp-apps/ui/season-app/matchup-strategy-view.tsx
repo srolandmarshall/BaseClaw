@@ -150,7 +150,7 @@ export function MatchupStrategyView({ data, app, navigate }: { data: MatchupStra
           <h2 className="text-lg font-semibold">Matchup Strategy</h2>
         </div>
         {app && (
-          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading} className="h-7 text-xs gap-1">
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading} className="h-8 text-xs gap-1">
             {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
             Refresh
           </Button>
@@ -161,7 +161,7 @@ export function MatchupStrategyView({ data, app, navigate }: { data: MatchupStra
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm text-muted-foreground">Week {d.week}</p>
-          <p className="font-semibold flex items-center" style={{ gap: "6px" }}>
+          <p className="font-semibold flex items-center gap-1.5">
             vs.
             {d.opp_team_logo && <img src={d.opp_team_logo} alt="" width={28} height={28} className="rounded-sm" style={{ flexShrink: 0 }} />}
             {d.opponent}
@@ -331,7 +331,7 @@ export function MatchupStrategyView({ data, app, navigate }: { data: MatchupStra
                         </div>
                       </TableCell>
                       <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
-                        <span className="flex items-center" style={{ gap: "4px" }}>
+                        <span className="flex items-center gap-1">
                           <TeamLogo abbrev={wt.team} />
                           {wt.team}
                         </span>
@@ -350,7 +350,7 @@ export function MatchupStrategyView({ data, app, navigate }: { data: MatchupStra
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-6 w-6 p-0"
+                            className="h-8 w-8 p-0"
                             onClick={function () { handleAdd(wt.pid); }}
                             disabled={loading}
                           >

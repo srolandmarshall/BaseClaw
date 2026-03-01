@@ -157,7 +157,7 @@ export function SimulateView({ data, app, navigate }: { data: SimulateData; app:
                   {data.add_player.intel && <span className="ml-1.5"><IntelBadge intel={data.add_player.intel} size="sm" /></span>}
                 </p>
                 <div className="flex items-center gap-1.5 mt-0.5">
-                  <span className="text-xs text-muted-foreground flex items-center" style={{ gap: "3px" }}>
+                  <span className="text-xs text-muted-foreground flex items-center gap-0.5">
                     <TeamLogo abbrev={data.add_player.team} size={14} />
                     {data.add_player.team}
                   </span>
@@ -186,7 +186,7 @@ export function SimulateView({ data, app, navigate }: { data: SimulateData; app:
                     {data.drop_player.intel && <span className="ml-1.5"><IntelBadge intel={data.drop_player.intel} size="sm" /></span>}
                   </p>
                   <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className="text-xs text-muted-foreground flex items-center" style={{ gap: "3px" }}>
+                    <span className="text-xs text-muted-foreground flex items-center gap-0.5">
                       <TeamLogo abbrev={data.drop_player.team} size={14} />
                       {data.drop_player.team}
                     </span>
@@ -322,7 +322,7 @@ export function SimulateView({ data, app, navigate }: { data: SimulateData; app:
                     >
                       <span className="font-medium">{p.name}</span>
                       <span className="text-xs text-muted-foreground">{p.position || ""}</span>
-                      <span className="text-xs text-muted-foreground ml-auto flex items-center" style={{ gap: "3px" }}>
+                      <span className="text-xs text-muted-foreground ml-auto flex items-center gap-0.5">
                         <TeamLogo abbrev={p.team} size={14} />
                         {p.team || ""}
                       </span>

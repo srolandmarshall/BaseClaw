@@ -84,7 +84,7 @@ function TrendTable({ players, direction }: { players: TrendPlayer[]; direction:
                   <div className="min-w-0">
                     <div className="font-medium text-sm truncate">{p.name}</div>
                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                      {logoUrl && <img src={logoUrl} alt={p.team} width={12} height={12} style={{ display: "inline", flexShrink: 0 }} />}
+                      {logoUrl && <img src={logoUrl} alt={p.team} width={12} height={12} className="inline shrink-0" />}
                       <span>{p.team}</span>
                       <span className="sm:hidden">{p.position ? " \u00b7 " + p.position : ""}</span>
                     </div>

@@ -141,7 +141,7 @@ function TrendsSection({ trends }: { trends: NonNullable<PlayerIntel["trends"]> 
           <span className={iconColor + " text-xs font-medium"}>{trends.hot_cold}</span>
         )}
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto mcp-app-scroll-x">
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-border">

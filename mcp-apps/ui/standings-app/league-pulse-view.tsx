@@ -48,7 +48,7 @@ export function LeaguePulseView({ data }: { data: { teams: LeaguePulseTeam[]; ai
   var leastActive = teams.length > 0 ? teams[teams.length - 1] : null;
 
   var chartData = teams.map((t) => ({
-    name: t.name.length > 16 ? t.name.slice(0, 14) + ".." : t.name,
+    name: t.name.length > 12 ? t.name.slice(0, 10) + ".." : t.name,
     moves: t.moves,
     trades: t.trades,
     isMyTeam: t.name === MY_TEAM,
@@ -87,7 +87,7 @@ export function LeaguePulseView({ data }: { data: { teams: LeaguePulseTeam[]; ai
             return (
               <TableRow key={t.team_key} className={isMyTeam ? "border-l-2 border-primary bg-primary/5" : ""}>
                 <TableCell className={"font-medium" + (isMyTeam ? " text-primary" : "")}>
-                  <span className="flex items-center" style={{ gap: "6px" }}>
+                  <span className="flex items-center gap-1.5">
                     {t.team_logo && <img src={t.team_logo} alt="" width={28} height={28} className="rounded-sm" style={{ flexShrink: 0 }} />}
                     {t.name}
                   </span>
@@ -123,7 +123,7 @@ export function LeaguePulseView({ data }: { data: { teams: LeaguePulseTeam[]; ai
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 20, left: 5, bottom: 5 }}>
                   <XAxis type="number" tick={{ fontSize: 12 }} />
-                  <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 12 }} />
+                  <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 12 }} />
                   <Tooltip />
                   <Bar dataKey="moves" stackId="a" fill="#3b82f6" barSize={20} />
                   <Bar dataKey="trades" stackId="a" fill="#f59e0b" barSize={20} radius={[0, 4, 4, 0]} />

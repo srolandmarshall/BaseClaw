@@ -229,7 +229,7 @@ export function MorningBriefingView({ data, app, navigate }: { data: MorningBrie
           {matchup.week && <Badge variant="outline" className="text-xs">Week {matchup.week}</Badge>}
         </div>
         {app && (
-          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading} className="h-7 text-xs gap-1">
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading} className="h-8 text-xs gap-1">
             {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
             Refresh
           </Button>
@@ -481,7 +481,7 @@ export function MorningBriefingView({ data, app, navigate }: { data: MorningBrie
                         <PlayerName name={wt.name} playerId={wt.pid} mlbId={wt.mlb_id} app={app} navigate={navigate} context="waivers" />
                       </TableCell>
                       <TableCell className="hidden sm:table-cell text-sm text-muted-foreground">
-                        <span className="flex items-center" style={{ gap: "4px" }}>
+                        <span className="flex items-center gap-1">
                           <TeamLogo abbrev={wt.team} />
                           {wt.team}
                         </span>
@@ -500,7 +500,7 @@ export function MorningBriefingView({ data, app, navigate }: { data: MorningBrie
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-6 w-6 p-0"
+                            className="h-8 w-8 p-0"
                             onClick={function () { handleAdd(wt.pid); }}
                             disabled={loading}
                           >

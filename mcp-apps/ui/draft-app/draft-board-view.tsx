@@ -211,7 +211,7 @@ export function DraftBoardView({ data }: { data: DraftBoardData }) {
             </div>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto mcp-app-scroll-x touch-pan-x">
               <table className="w-full text-xs border-collapse">
                 <thead>
                   <tr>
@@ -289,7 +289,7 @@ export function DraftBoardView({ data }: { data: DraftBoardData }) {
                                 {posLabel && (
                                   <span
                                     className={
-                                      "text-[10px] leading-none px-1 rounded " +
+                                      "text-xs leading-none px-1 rounded " +
                                       (pitcher
                                         ? "text-orange-600 dark:text-orange-400 bg-orange-500/10"
                                         : "text-blue-600 dark:text-blue-400 bg-blue-500/10")

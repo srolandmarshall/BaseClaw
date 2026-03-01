@@ -213,7 +213,7 @@ button, a, [role="button"] {
 }
 
 .app-kicker {
-  font-size: 0.72rem;
+  font-size: var(--app-text-xs);
   color: var(--color-muted-foreground);
   font-weight: 600;
 }

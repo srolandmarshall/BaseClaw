@@ -84,7 +84,7 @@ export function ScoutView({ data, app, navigate }: { data: ScoutOpponentData; ap
           <h2 className="text-lg font-semibold">Opponent Scout Report</h2>
         </div>
         {app && (
-          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading} className="h-7 text-xs gap-1">
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading} className="h-8 text-xs gap-1">
             {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
             Refresh
           </Button>

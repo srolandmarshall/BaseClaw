@@ -124,13 +124,13 @@ export function LineupOptimizeView({ data, app, navigate }: { data: LineupData; 
                   <TableRow key={p.name}>
                     <TableCell className="font-mono text-xs">{p.position || "?"}</TableCell>
                     <TableCell className="font-medium">
-                      <span className="flex items-center" style={{ gap: "4px" }}>
+                      <span className="flex items-center gap-1">
                         <PlayerName name={p.name} mlbId={p.mlb_id} app={app} navigate={navigate} context="roster" />
                         {p.intel && <IntelBadge intel={p.intel} size="sm" />}
                       </span>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      <span className="flex items-center" style={{ gap: "4px" }}>
+                      <span className="flex items-center gap-1">
                         <TeamLogo abbrev={p.team} />
                         {p.team || "?"}
                       </span>
@@ -162,13 +162,13 @@ export function LineupOptimizeView({ data, app, navigate }: { data: LineupData; 
                   <TableRow key={p.name}>
                     <TableCell className="font-mono text-xs">BN</TableCell>
                     <TableCell className="font-medium">
-                      <span className="flex items-center" style={{ gap: "4px" }}>
+                      <span className="flex items-center gap-1">
                         <PlayerName name={p.name} mlbId={p.mlb_id} app={app} navigate={navigate} context="roster" />
                         {p.intel && <IntelBadge intel={p.intel} size="sm" />}
                       </span>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      <span className="flex items-center" style={{ gap: "4px" }}>
+                      <span className="flex items-center gap-1">
                         <TeamLogo abbrev={p.team} />
                         {p.team || "?"}
                       </span>
@@ -186,7 +186,7 @@ export function LineupOptimizeView({ data, app, navigate }: { data: LineupData; 
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-2">
               Suggested Swaps
-              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={handleCopySwaps}>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleCopySwaps}>
                 {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
               </Button>
             </CardTitle>

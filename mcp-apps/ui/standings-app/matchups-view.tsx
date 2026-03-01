@@ -57,7 +57,7 @@ export function MatchupsView({ data, app, navigate, toolName }: { data: Matchups
               <CardContent className="py-2 px-3">
                 <div className="flex items-center justify-between">
                   <div className="flex-1 min-w-0">
-                    <p className={"font-medium flex items-center" + (name1 === MY_TEAM ? " text-primary" : "")} style={{ gap: "6px" }}>
+                    <p className={"font-medium flex items-center gap-1.5" + (name1 === MY_TEAM ? " text-primary" : "")}>
                       {m.team1_logo && <img src={m.team1_logo} alt="" width={28} height={28} className="rounded-sm" style={{ flexShrink: 0 }} />}
                       <span className="truncate">{name1}</span>
                     </p>
@@ -67,7 +67,7 @@ export function MatchupsView({ data, app, navigate, toolName }: { data: Matchups
                     {m.status && <span className="text-xs text-muted-foreground mt-0.5">{m.status}</span>}
                   </div>
                   <div className="flex-1 min-w-0 text-right">
-                    <p className={"font-medium flex items-center justify-end" + (name2 === MY_TEAM ? " text-primary" : "")} style={{ gap: "6px" }}>
+                    <p className={"font-medium flex items-center justify-end gap-1.5" + (name2 === MY_TEAM ? " text-primary" : "")}>
                       <span className="truncate">{name2}</span>
                       {m.team2_logo && <img src={m.team2_logo} alt="" width={28} height={28} className="rounded-sm" style={{ flexShrink: 0 }} />}
                     </p>
