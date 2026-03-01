@@ -4,6 +4,7 @@
 import sys
 import json
 import os
+import datetime
 import yahoo_fantasy_api as yfa
 from mlb_id_cache import get_mlb_id
 from shared import (
@@ -160,12 +161,22 @@ def cmd_info(args, as_json=False):
     """Show league and team info"""
     sc, gm, lg = get_league()
     settings = lg.settings()
-    team = lg.to_team(TEAM_ID)
-    team_name = (
-        team.team_data.get("name", "Unknown")
-        if hasattr(team, "team_data")
-        else "Unknown"
-    )
+    team_name = "Unknown"
+    try:
+        team = lg.to_team(TEAM_ID)
+        if hasattr(team, "team_data"):
+            team_name = team.team_data.get("name", "Unknown")
+    except Exception:
+        pass
+    if team_name == "Unknown":
+        try:
+            teams = lg.teams()
+            for tk, td in teams.items():
+                if tk == TEAM_ID:
+                    team_name = td.get("name", "Unknown")
+                    break
+        except Exception:
+            pass
 
     if as_json:
         return {
@@ -1447,6 +1458,258 @@ def cmd_discover(args, as_json=False):
         print("")
 
 
+def cmd_player_stats(args, as_json=False):
+    """Get player fantasy stats from Yahoo for a given period"""
+    if not args:
+        if as_json:
+            return {"error": "Usage: player-stats <name> [period] [week|date]"}
+        print("Usage: player-stats <name> [period] [week|date]")
+        print("  period: season (default), average_season, lastweek, lastmonth, week, date")
+        return
+
+    # Parse arguments: name is first, period is optional second, week/date is optional third
+    name = args[0]
+    period = args[1] if len(args) > 1 else "season"
+    extra = args[2] if len(args) > 2 else None
+
+    sc, gm, lg = get_league()
+
+    # Look up player — try roster first (cheap), then player_details (searches all)
+    try:
+        found = None
+
+        # Check our own roster first (single API call, most common use case)
+        team = lg.to_team(TEAM_ID)
+        roster = team.roster()
+        if roster:
+            for p in roster:
+                if name.lower() in p.get("name", "").lower():
+                    found = p
+                    break
+
+        # Use player_details to search all players (avoids 2x free_agents calls)
+        if not found:
+            try:
+                search_results = lg.player_details(name)
+                if search_results:
+                    found = search_results[0] if isinstance(search_results, list) else search_results
+            except Exception:
+                pass
+
+        if not found:
+            if as_json:
+                return {"error": "Player not found: " + name}
+            print("Player not found: " + name)
+            return
+
+        player_id = found.get("player_id", "")
+        player_name = found.get("name", name)
+
+        # Build the player_stats call
+        kwargs = {}
+        if period == "week" and extra:
+            kwargs["req_type"] = "week"
+            kwargs["week"] = int(extra)
+        elif period == "date" and extra:
+            kwargs["req_type"] = "date"
+            kwargs["date"] = extra
+        else:
+            kwargs["req_type"] = period
+
+        stats = lg.player_stats([player_id], **kwargs)
+        if not stats:
+            if as_json:
+                return {"error": "No stats returned for " + player_name}
+            print("No stats returned for " + player_name)
+            return
+
+        # stats is typically a list of player stat dicts
+        player_stats = stats[0] if isinstance(stats, list) else stats
+
+        if as_json:
+            return {
+                "player_name": player_name,
+                "player_id": str(player_id),
+                "period": period,
+                "week": extra if period == "week" else None,
+                "date": extra if period == "date" else None,
+                "stats": player_stats,
+                "mlb_id": get_mlb_id(player_name),
+            }
+
+        print("Stats for " + player_name + " (" + period + "):")
+        if isinstance(player_stats, dict):
+            for key, val in player_stats.items():
+                if key not in ("player_id", "name"):
+                    print("  " + str(key).ljust(20) + str(val))
+        else:
+            print("  " + str(player_stats))
+
+    except Exception as e:
+        if as_json:
+            return {"error": "Error fetching player stats: " + str(e)}
+        print("Error fetching player stats: " + str(e))
+
+
+def cmd_waivers(args, as_json=False):
+    """Show players currently on waivers (not yet free agents)"""
+    sc, gm, lg = get_league()
+    try:
+        waivers = lg.waivers()
+        if not waivers:
+            if as_json:
+                return {"players": []}
+            print("No players on waivers")
+            return
+
+        if as_json:
+            players = []
+            for p in waivers:
+                players.append({
+                    "name": p.get("name", "Unknown"),
+                    "player_id": str(p.get("player_id", "")),
+                    "eligible_positions": p.get("eligible_positions", []),
+                    "percent_owned": p.get("percent_owned", 0),
+                    "status": p.get("status", ""),
+                    "mlb_id": get_mlb_id(p.get("name", "")),
+                })
+            enrich_with_intel(players)
+            return {"players": players}
+
+        print("Players on Waivers:")
+        for p in waivers:
+            pname = p.get("name", "Unknown")
+            positions = ",".join(p.get("eligible_positions", ["?"]))
+            pct = p.get("percent_owned", 0)
+            pid = p.get("player_id", "?")
+            status = p.get("status", "")
+            line = "  " + pname.ljust(25) + " " + positions.ljust(12) + " " + str(pct).rjust(3) + "% owned  (id:" + str(pid) + ")"
+            if status:
+                line += " [" + status + "]"
+            print(line)
+
+    except Exception as e:
+        if as_json:
+            return {"error": "Error fetching waivers: " + str(e)}
+        print("Error fetching waivers: " + str(e))
+
+
+def cmd_taken_players(args, as_json=False):
+    """Show all rostered players across the league"""
+    sc, gm, lg = get_league()
+    position = args[0] if args else None
+
+    try:
+        taken = lg.taken_players()
+        if not taken:
+            if as_json:
+                return {"players": []}
+            print("No taken players found")
+            return
+
+        # Filter by position if specified
+        if position:
+            filtered = []
+            for p in taken:
+                elig = p.get("eligible_positions", [])
+                if position.upper() in [pos.upper() for pos in elig]:
+                    filtered.append(p)
+            taken = filtered
+
+        if as_json:
+            players = []
+            for p in taken:
+                players.append({
+                    "name": p.get("name", "Unknown"),
+                    "player_id": str(p.get("player_id", "")),
+                    "eligible_positions": p.get("eligible_positions", []),
+                    "percent_owned": p.get("percent_owned", 0),
+                    "status": p.get("status", ""),
+                    "owner": p.get("owner", ""),
+                    "mlb_id": get_mlb_id(p.get("name", "")),
+                })
+            return {"players": players, "position": position, "count": len(players)}
+
+        print("All Rostered Players" + (" (" + position + ")" if position else "") + ":")
+        for p in taken:
+            pname = p.get("name", "Unknown")
+            positions = ",".join(p.get("eligible_positions", ["?"]))
+            pct = p.get("percent_owned", 0)
+            owner = p.get("owner", "")
+            line = "  " + pname.ljust(25) + " " + positions.ljust(12) + " " + str(pct).rjust(3) + "% owned"
+            if owner:
+                line += "  -> " + owner
+            print(line)
+
+    except Exception as e:
+        if as_json:
+            return {"error": "Error fetching taken players: " + str(e)}
+        print("Error fetching taken players: " + str(e))
+
+
+def cmd_roster_history(args, as_json=False):
+    """Show roster for a past week or date"""
+    if not args:
+        if as_json:
+            return {"error": "Usage: roster-history <week|date> [team_key]"}
+        print("Usage: roster-history <week_number|YYYY-MM-DD> [team_key]")
+        return
+
+    lookup = args[0]
+    team_key = args[1] if len(args) > 1 else None
+
+    sc, gm, lg = get_league()
+    team = lg.to_team(team_key or TEAM_ID)
+
+    try:
+        # Determine if lookup is a date or week number
+        if "-" in lookup:
+            # Date format: YYYY-MM-DD
+            d = datetime.date.fromisoformat(lookup)
+            roster = team.roster(day=d)
+            label = "date " + lookup
+        else:
+            # Week number
+            week = int(lookup)
+            roster = team.roster(week=week)
+            label = "week " + str(week)
+
+        if not roster:
+            if as_json:
+                return {"players": [], "lookup": lookup}
+            print("No roster data for " + label)
+            return
+
+        if as_json:
+            players = []
+            for p in roster:
+                players.append({
+                    "name": p.get("name", "Unknown"),
+                    "player_id": str(p.get("player_id", "")),
+                    "position": p.get("selected_position", {}).get("position", "?"),
+                    "eligible_positions": p.get("eligible_positions", []),
+                    "status": p.get("status", ""),
+                    "mlb_id": get_mlb_id(p.get("name", "")),
+                })
+            return {"players": players, "lookup": lookup, "label": label}
+
+        print("Roster for " + label + ":")
+        for p in roster:
+            pos = p.get("selected_position", {}).get("position", "?")
+            pname = p.get("name", "Unknown")
+            status = p.get("status", "")
+            elig = ",".join(p.get("eligible_positions", []))
+            line = "  " + pos.ljust(4) + " " + pname.ljust(25) + " " + elig
+            if status:
+                line += " [" + status + "]"
+            print(line)
+
+    except Exception as e:
+        if as_json:
+            return {"error": "Error fetching roster history: " + str(e)}
+        print("Error fetching roster history: " + str(e))
+
+
 COMMANDS = {
     "discover": cmd_discover,
     "roster": cmd_roster,
@@ -1467,6 +1730,10 @@ COMMANDS = {
     "waiver-claim-swap": cmd_waiver_claim_swap,
     "who-owns": cmd_who_owns,
     "league-pulse": cmd_league_pulse,
+    "player-stats": cmd_player_stats,
+    "waivers": cmd_waivers,
+    "taken-players": cmd_taken_players,
+    "roster-history": cmd_roster_history,
 }
 
 if __name__ == "__main__":

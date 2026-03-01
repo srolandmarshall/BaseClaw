@@ -4,7 +4,7 @@ import { z } from "zod";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { apiGet, apiPost, toolError } from "../api/python-client.js";
-import { str, type RosterResponse, type FreeAgentsResponse, type SearchResponse, type ActionResponse, type WaiverClaimResponse, type WaiverClaimSwapResponse, type WhoOwnsResponse, type ChangeTeamNameResponse, type ChangeTeamLogoResponse } from "../api/types.js";
+import { str, type RosterResponse, type FreeAgentsResponse, type SearchResponse, type ActionResponse, type WaiverClaimResponse, type WaiverClaimSwapResponse, type WhoOwnsResponse, type ChangeTeamNameResponse, type ChangeTeamLogoResponse, type PlayerStatsResponse, type WaiversResponse, type TakenPlayersResponse } from "../api/types.js";
 
 const ROSTER_URI = "ui://fbb-mcp/roster.html";
 
@@ -360,6 +360,107 @@ export function registerRosterTools(server: McpServer, distDir: string, writesEn
         return {
           content: [{ type: "text" as const, text }],
           structuredContent: { type: "who-owns", ai_recommendation, ...data },
+        };
+      } catch (e) { return toolError(e); }
+    },
+  );
+
+  // yahoo_player_stats
+  registerAppTool(
+    server,
+    "yahoo_player_stats",
+    {
+      description: "Get a player's fantasy stats from Yahoo. period: season (default), average_season, lastweek, lastmonth, week, date",
+      inputSchema: {
+        player_name: z.string().describe("Player name to look up"),
+        period: z.string().describe("Stats period: season, average_season, lastweek, lastmonth, week, date").default("season"),
+        week: z.string().describe("Week number (when period=week)").default(""),
+        date: z.string().describe("Date YYYY-MM-DD (when period=date)").default(""),
+      },
+      annotations: { readOnlyHint: true },
+      _meta: { ui: { resourceUri: ROSTER_URI } },
+    },
+    async ({ player_name, period, week, date }) => {
+      try {
+        const params: Record<string, string> = { name: player_name, period };
+        if (week) params.week = week;
+        if (date) params.date = date;
+        const data = await apiGet<PlayerStatsResponse>("/api/player-stats", params);
+        const lines = ["Stats for " + data.player_name + " (" + data.period + "):"];
+        const stats = data.stats || {};
+        for (const [key, val] of Object.entries(stats)) {
+          if (key !== "player_id" && key !== "name") {
+            lines.push("  " + str(key).padEnd(20) + str(val));
+          }
+        }
+        const ai_recommendation = "Review " + data.player_name + "'s stats to evaluate roster value and trade potential.";
+        return {
+          content: [{ type: "text" as const, text: lines.join("\n") }],
+          structuredContent: { type: "player-stats", ai_recommendation, ...data },
+        };
+      } catch (e) { return toolError(e); }
+    },
+  );
+
+  // yahoo_waivers
+  registerAppTool(
+    server,
+    "yahoo_waivers",
+    {
+      description: "Show players currently on waivers (in claim period, not yet free agents)",
+      annotations: { readOnlyHint: true },
+      _meta: { ui: { resourceUri: ROSTER_URI } },
+    },
+    async () => {
+      try {
+        const data = await apiGet<WaiversResponse>("/api/waivers");
+        const players = data.players || [];
+        const text = players.length > 0
+          ? "Players on Waivers (" + players.length + "):\n" + players.map((p) => {
+              let line = "  " + str(p.name).padEnd(25) + " " + (p.eligible_positions || []).join(",").padEnd(12) + " " + String(p.percent_owned || 0).padStart(3) + "% owned  (id:" + p.player_id + ")";
+              if (p.status) line += " [" + p.status + "]";
+              return line;
+            }).join("\n")
+          : "No players currently on waivers.";
+        const ai_recommendation = players.length > 0
+          ? players.length + " player" + (players.length === 1 ? "" : "s") + " on waivers. Submit waiver claims before the deadline to add them."
+          : null;
+        return {
+          content: [{ type: "text" as const, text }],
+          structuredContent: { type: "waivers", ai_recommendation, ...data },
+        };
+      } catch (e) { return toolError(e); }
+    },
+  );
+
+  // yahoo_all_rostered
+  registerAppTool(
+    server,
+    "yahoo_all_rostered",
+    {
+      description: "Show all rostered players across the league. Optional position filter.",
+      inputSchema: {
+        position: z.string().describe("Filter by position (e.g. OF, SP, C). Empty for all.").default(""),
+      },
+      annotations: { readOnlyHint: true },
+      _meta: { ui: { resourceUri: ROSTER_URI } },
+    },
+    async ({ position }) => {
+      try {
+        const params: Record<string, string> = {};
+        if (position) params.position = position;
+        const data = await apiGet<TakenPlayersResponse>("/api/taken-players", params);
+        const players = data.players || [];
+        const label = position ? "Rostered " + position + " Players" : "All Rostered Players";
+        const text = label + " (" + data.count + "):\n" + players.slice(0, 50).map((p) => {
+          let line = "  " + str(p.name).padEnd(25) + " " + (p.eligible_positions || []).join(",").padEnd(12) + " " + String(p.percent_owned || 0).padStart(3) + "% owned";
+          if (p.owner) line += "  -> " + p.owner;
+          return line;
+        }).join("\n");
+        const ai_recommendation = data.count + " players rostered" + (position ? " at " + position : "") + " across the league. Use this to understand player pool availability.";
+        return {
+          content: [{ type: "text" as const, text }],
+          structuredContent: { type: "all-rostered", ai_recommendation, ...data },
         };
       } catch (e) { return toolError(e); }
     },

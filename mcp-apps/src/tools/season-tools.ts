@@ -42,6 +42,7 @@ import {
   type WeekPlannerResponse,
   type CloserMonitorResponse,
   type PitcherMatchupResponse,
+  type RosterStatsResponse,
 } from "../api/types.js";
 
 export const SEASON_URI = "ui://fbb-mcp/season.html";
@@ -769,6 +770,50 @@ export function registerSeasonTools(server: McpServer, distDir: string, writesEn
         return {
           content: [{ type: "text" as const, text: lines.join("\n") }],
           structuredContent: { type: "pitcher-matchup", ai_recommendation, ...data },
+        };
+      } catch (e) { return toolError(e); }
+    },
+  );
+
+  // yahoo_roster_stats
+  registerAppTool(
+    server,
+    "yahoo_roster_stats",
+    {
+      description: "Show fantasy stats for every player on a roster. period: season (default) or week. Optionally specify a week number or team_key.",
+      inputSchema: {
+        period: z.string().describe("Stats period: season or week").default("season"),
+        week: z.string().describe("Week number (optional, required when period=week)").default(""),
+        team_key: z.string().describe("Team key to check (optional, defaults to your team)").default(""),
+      },
+      annotations: { readOnlyHint: true },
+      _meta: { ui: { resourceUri: SEASON_URI } },
+    },
+    async ({ period, week, team_key }) => {
+      try {
+        const params: Record<string, string> = { period };
+        if (week) params.week = week;
+        if (team_key) params.team_key = team_key;
+        const data = await apiGet<RosterStatsResponse>("/api/roster-stats", params);
+        const lines = ["Roster Stats (" + data.period + (data.week ? " week " + data.week : "") + "):"];
+        for (const p of data.players || []) {
+          lines.push("  " + str(p.position).padEnd(4) + " " + str(p.name).padEnd(25));
+          const stats = p.stats || {};
+          const statParts: string[] = [];
+          for (const [key, val] of Object.entries(stats)) {
+            if (key !== "player_id" && key !== "name") {
+              statParts.push(str(key) + ":" + str(val));
+            }
+          }
+          if (statParts.length > 0) {
+            lines.push("       " + statParts.join("  "));
+          }
+        }
+        const playerCount = (data.players || []).length;
+        const ai_recommendation = playerCount + " player" + (playerCount === 1 ? "" : "s") + " with " + data.period + " stats. Compare individual contributions to identify underperformers.";
+        return {
+          content: [{ type: "text" as const, text: lines.join("\n") }],
+          structuredContent: { type: "roster-stats", ai_recommendation, ...data },
         };
       } catch (e) { return toolError(e); }
     },

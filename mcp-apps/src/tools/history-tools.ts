@@ -13,6 +13,7 @@ import {
   type PastTeamsResponse,
   type PastTradesResponse,
   type PastMatchupResponse,
+  type RosterHistoryResponse,
 } from "../api/types.js";
 
 const HISTORY_URI = "ui://fbb-mcp/history.html";
@@ -236,6 +237,50 @@ export function registerHistoryTools(server: McpServer, distDir: string) {
         return {
           content: [{ type: "text" as const, text: lines.join("\n") }],
           structuredContent: { type: "past-matchup", ai_recommendation: null, ...data },
+        };
+      } catch (e) { return toolError(e); }
+    },
+  );
+
+  // yahoo_roster_history
+  registerAppTool(
+    server,
+    "yahoo_roster_history",
+    {
+      description: "View a team's roster from a past week or specific date",
+      inputSchema: {
+        week: z.string().describe("Week number to look up").default(""),
+        date: z.string().describe("Date to look up (YYYY-MM-DD)").default(""),
+        team_key: z.string().describe("Team key (optional, defaults to your team)").default(""),
+      },
+      annotations: { readOnlyHint: true },
+      _meta: { ui: { resourceUri: HISTORY_URI } },
+    },
+    async ({ week, date, team_key }) => {
+      try {
+        const params: Record<string, string> = {};
+        if (week) params.week = week;
+        if (date) params.date = date;
+        if (team_key) params.team_key = team_key;
+        if (!week && !date) {
+          return {
+            content: [{ type: "text" as const, text: "Error: provide either week or date parameter" }],
+            structuredContent: { type: "_error", message: "Missing week or date parameter" },
+            isError: true as const,
+          };
+        }
+        const data = await apiGet<RosterHistoryResponse>("/api/roster-history", params);
+        const players = data.players || [];
+        const lines = ["Roster for " + data.label + ":"];
+        for (const p of players) {
+          let line = "  " + str(p.position).padEnd(4) + " " + str(p.name).padEnd(25) + " " + (p.eligible_positions || []).join(",");
+          if (p.status) line += " [" + p.status + "]";
+          lines.push(line);
+        }
+        const ai_recommendation = players.length + " player" + (players.length === 1 ? "" : "s") + " on roster for " + data.label + ".";
+        return {
+          content: [{ type: "text" as const, text: lines.join("\n") }],
+          structuredContent: { type: "roster-history", ai_recommendation, ...data },
         };
       } catch (e) { return toolError(e); }
     },

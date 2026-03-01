@@ -323,6 +323,7 @@ export interface TradeEvalResponse {
 export interface DailyUpdateResponse {
   lineup: LineupOptimizeResponse;
   injuries: InjuryReportResponse;
+  edit_date?: string | null;
 }
 
 // Draft responses
@@ -1119,6 +1120,7 @@ export interface MorningBriefingResponse {
   whats_new: WhatsNewResponse;
   waiver_batters: WaiverAnalyzeResponse;
   waiver_pitchers: WaiverAnalyzeResponse;
+  edit_date?: string | null;
 }
 
 export interface LeagueLandscapeResponse {
@@ -1175,3 +1177,59 @@ export interface TradeAnalysisResponse {
   trade_eval: TradeEvalResponse | null;
   intel: Record<string, PlayerIntel>;
 }
+
+// Player Stats response
+export interface PlayerStatsResponse {
+  player_name: string;
+  player_id: string;
+  period: string;
+  week?: string | null;
+  date?: string | null;
+  stats: Record<string, string | number>;
+  mlb_id?: number;
+}
+
+// Roster Stats response
+export interface RosterStatsPlayer {
+  name: string;
+  player_id: string;
+  position: string;
+  eligible_positions: string[];
+  stats: Record<string, string | number>;
+  mlb_id?: number;
+}
+
+export interface RosterStatsResponse {
+  players: RosterStatsPlayer[];
+  period: string;
+  week?: string | null;
+}
+
+// Roster History response
+export interface RosterHistoryPlayer {
+  name: string;
+  player_id: string;
+  position: string;
+  eligible_positions: string[];
+  status: string;
+  mlb_id?: number;
+}
+
+export interface RosterHistoryResponse {
+  players: RosterHistoryPlayer[];
+  lookup: string;
+  label: string;
+}
+
+// Waivers response
+export interface WaiversResponse {
+  players: Player[];
+}
+
+// Taken Players (All Rostered) response
+export interface TakenPlayersResponse {
+  players: Array<Player & { owner?: string }>;
+  position?: string | null;
+  count: number;
+}
+

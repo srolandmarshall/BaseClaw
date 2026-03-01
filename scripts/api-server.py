@@ -734,6 +734,86 @@ def api_pitcher_matchup():
         return jsonify({"error": str(e)}), 500
 
 
+# --- New Yahoo API Tools ---
+
+
+@app.route("/api/player-stats")
+def api_player_stats():
+    try:
+        name = request.args.get("name", "")
+        if not name:
+            return jsonify({"error": "Missing name parameter"}), 400
+        period = request.args.get("period", "season")
+        week = request.args.get("week", "")
+        date_str = request.args.get("date", "")
+        args = [name, period]
+        if period == "week" and week:
+            args.append(week)
+        elif period == "date" and date_str:
+            args.append(date_str)
+        result = yahoo_fantasy.cmd_player_stats(args, as_json=True)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/roster-stats")
+def api_roster_stats():
+    try:
+        period = request.args.get("period", "season")
+        week = request.args.get("week", "")
+        team_key = request.args.get("team_key", "")
+        args = []
+        if period:
+            args.append("--period=" + period)
+        if week:
+            args.append("--week=" + week)
+        if team_key:
+            args.append("--team=" + team_key)
+        result = season_manager.cmd_roster_stats(args, as_json=True)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/roster-history")
+def api_roster_history():
+    try:
+        week = request.args.get("week", "")
+        date_str = request.args.get("date", "")
+        team_key = request.args.get("team_key", "")
+        lookup = week or date_str
+        if not lookup:
+            return jsonify({"error": "Missing week or date parameter"}), 400
+        args = [lookup]
+        if team_key:
+            args.append(team_key)
+        result = yahoo_fantasy.cmd_roster_history(args, as_json=True)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/waivers")
+def api_waivers():
+    try:
+        result = yahoo_fantasy.cmd_waivers([], as_json=True)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/taken-players")
+def api_taken_players():
+    try:
+        position = request.args.get("position", "")
+        args = [position] if position else []
+        result = yahoo_fantasy.cmd_taken_players(args, as_json=True)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # --- MLB Data (mlb-data.py) ---
 # TS tools call: /api/mlb/teams, /api/mlb/roster, etc. (these already match)
 
@@ -1100,6 +1180,14 @@ def workflow_morning_briefing():
             injury, lineup, whats_new, waiver_b, waiver_p
         )
 
+        # Include next lineup edit date
+        edit_date = None
+        try:
+            _sc, _gm, _lg = yahoo_fantasy.get_league()
+            edit_date = str(_lg.edit_date())
+        except Exception:
+            pass
+
         return jsonify({
             "action_items": action_items,
             "injury": injury,
@@ -1109,6 +1197,7 @@ def workflow_morning_briefing():
             "whats_new": whats_new,
             "waiver_batters": waiver_b,
             "waiver_pitchers": waiver_p,
+            "edit_date": edit_date,
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500

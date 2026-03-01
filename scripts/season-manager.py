@@ -1453,6 +1453,11 @@ def cmd_daily_update(args, as_json=False):
             result["injuries"] = cmd_injury_report([], as_json=True)
         except Exception as e:
             result["injuries"] = {"error": str(e)}
+        try:
+            sc, gm, lg = get_league()
+            result["edit_date"] = str(lg.edit_date())
+        except Exception:
+            result["edit_date"] = None
         return result
 
     print("=" * 50)
@@ -3408,10 +3413,13 @@ def cmd_season_pace(args, as_json=False):
         standings = lg.standings()
         settings = lg.settings()
         current_week = lg.current_week()
-        end_week = settings.get("end_week", 22)
-        if not end_week:
-            end_week = 22
-        end_week = int(end_week)
+        try:
+            end_week = int(lg.end_week())
+        except Exception:
+            end_week = settings.get("end_week", 22)
+            if not end_week:
+                end_week = 22
+            end_week = int(end_week)
         playoff_teams = int(settings.get("num_playoff_teams", 6))
 
         # Fetch teams for logo/avatar data
@@ -3818,6 +3826,105 @@ def cmd_pitcher_matchup(args, as_json=False):
         print("Error building pitcher matchups: " + str(e))
 
 
+def cmd_roster_stats(args, as_json=False):
+    """Show stats for every player on a roster for a given period"""
+    period = "season"
+    week = None
+    team_key = None
+
+    for arg in args:
+        if arg.startswith("--period="):
+            period = arg.split("=", 1)[1]
+        elif arg.startswith("--week="):
+            week = arg.split("=", 1)[1]
+        elif arg.startswith("--team="):
+            team_key = arg.split("=", 1)[1]
+
+    if period == "week" and week:
+        req_type = "week"
+    else:
+        req_type = period
+
+    sc, gm, lg, team = get_league_context()
+    if team_key:
+        team = lg.to_team(team_key)
+
+    try:
+        # Get roster (for specific week if requested)
+        if week:
+            roster = team.roster(week=int(week))
+        else:
+            roster = team.roster()
+
+        if not roster:
+            if as_json:
+                return {"players": [], "period": period}
+            print("Roster is empty")
+            return
+
+        # Collect player IDs
+        player_ids = []
+        player_map = {}
+        for p in roster:
+            pid = p.get("player_id", "")
+            if pid:
+                player_ids.append(pid)
+                player_map[str(pid)] = p
+
+        if not player_ids:
+            if as_json:
+                return {"players": [], "period": period}
+            print("No player IDs found on roster")
+            return
+
+        # Fetch stats in batch
+        kwargs = {"req_type": req_type}
+        if req_type == "week" and week:
+            kwargs["week"] = int(week)
+
+        stats = lg.player_stats(player_ids, **kwargs)
+
+        results = []
+        if stats:
+            for ps in (stats if isinstance(stats, list) else [stats]):
+                pid = str(ps.get("player_id", ""))
+                roster_entry = player_map.get(pid, {})
+                pos = roster_entry.get("selected_position", {}).get("position", "?")
+                pname = roster_entry.get("name", ps.get("name", "Unknown"))
+                results.append({
+                    "name": pname,
+                    "player_id": pid,
+                    "position": pos,
+                    "eligible_positions": roster_entry.get("eligible_positions", []),
+                    "stats": ps,
+                    "mlb_id": get_mlb_id(pname),
+                })
+
+        if as_json:
+            return {
+                "players": results,
+                "period": period,
+                "week": week,
+            }
+
+        print("Roster Stats (" + period + "):")
+        for r in results:
+            print("  " + r.get("position", "?").ljust(4) + " " + r.get("name", "?").ljust(25))
+            st = r.get("stats", {})
+            if isinstance(st, dict):
+                stat_parts = []
+                for k, v in st.items():
+                    if k not in ("player_id", "name"):
+                        stat_parts.append(str(k) + ":" + str(v))
+                if stat_parts:
+                    print("       " + "  ".join(stat_parts))
+
+    except Exception as e:
+        if as_json:
+            return {"error": "Error fetching roster stats: " + str(e)}
+        print("Error fetching roster stats: " + str(e))
+
+
 COMMANDS = {
     "lineup-optimize": cmd_lineup_optimize,
     "category-check": cmd_category_check,
@@ -3841,6 +3948,7 @@ COMMANDS = {
     "season-pace": cmd_season_pace,
     "closer-monitor": cmd_closer_monitor,
     "pitcher-matchup": cmd_pitcher_matchup,
+    "roster-stats": cmd_roster_stats,
 }
 
 if __name__ == "__main__":
