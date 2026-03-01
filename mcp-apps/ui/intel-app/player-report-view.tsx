@@ -8,6 +8,7 @@ import { KpiTile } from "../shared/kpi-tile";
 import { VerdictBadge } from "../shared/verdict-badge";
 import { Button } from "../components/ui/button";
 import { Copy, Check } from "@/shared/icons";
+import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer } from "recharts";
 
 // Data comes from /api/intel/player — it IS the PlayerIntel object with a name
 interface PlayerReportData extends PlayerIntel {
@@ -100,6 +101,37 @@ export function PlayerReportView({ data, app, navigate }: { data: PlayerReportDa
           )}
         </div>
       )}
+
+      {/* Statcast Profile radar chart from percentile data */}
+      {data.percentiles && data.percentiles.metrics && Object.keys(data.percentiles.metrics).length > 2 && (function () {
+        var metrics = data.percentiles.metrics;
+        var radarData = Object.entries(metrics).map(function (entry) {
+          var key = entry[0];
+          var val = entry[1];
+          return {
+            metric: key.replace(/_/g, " "),
+            value: typeof val === "number" ? val : (val && (val as any).percentile ? (val as any).percentile : 0),
+            fullMark: 100,
+          };
+        });
+        return (
+          <Card>
+            <CardContent className="p-4">
+              <p className="text-sm font-semibold mb-2">Statcast Profile</p>
+              <div className="h-48 sm:h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <RadarChart data={radarData}>
+                    <PolarGrid />
+                    <PolarAngleAxis dataKey="metric" tick={{ fontSize: 11 }} />
+                    <PolarRadiusAxis tick={{ fontSize: 9 }} domain={[0, 100]} />
+                    <Radar dataKey="value" stroke="var(--color-primary)" fill="var(--color-primary)" fillOpacity={0.3} />
+                  </RadarChart>
+                </ResponsiveContainer>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       <IntelPanel intel={data} defaultExpanded />
     </div>

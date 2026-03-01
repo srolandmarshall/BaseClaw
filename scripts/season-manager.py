@@ -4064,6 +4064,207 @@ def cmd_faab_recommend(args, as_json=False):
         print("  " + r)
 
 
+def cmd_ownership_trends(args, as_json=False):
+    """Show ownership % trend for a player over time from season.db
+    Args: player_name
+    """
+    if not args:
+        if as_json:
+            return {"error": "Usage: ownership-trends <player_name>"}
+        print("Usage: ownership-trends <player_name>")
+        return
+
+    player_name = " ".join(args)
+
+    # Try to find player_id via roster or search
+    player_id = None
+    resolved_name = player_name
+    try:
+        sc, gm, lg = get_league()
+        team = lg.to_team(TEAM_ID)
+        roster = team.roster()
+        for p in roster:
+            if player_name.lower() in p.get("name", "").lower():
+                player_id = str(p.get("player_id", ""))
+                resolved_name = p.get("name", player_name)
+                break
+        if not player_id:
+            for pos_type in ["B", "P"]:
+                try:
+                    fa = lg.free_agents(pos_type)
+                    for p in fa:
+                        if player_name.lower() in p.get("name", "").lower():
+                            player_id = str(p.get("player_id", ""))
+                            resolved_name = p.get("name", player_name)
+                            break
+                except Exception:
+                    pass
+                if player_id:
+                    break
+    except Exception as e:
+        if not as_json:
+            print("Warning: could not search for player: " + str(e))
+
+    if not player_id:
+        if as_json:
+            return {"error": "Player not found: " + player_name}
+        print("Player not found: " + player_name)
+        return
+
+    # Query ownership_history from season.db
+    try:
+        db = get_db()
+        rows = db.execute(
+            "SELECT date, pct_owned FROM ownership_history WHERE player_id = ? ORDER BY date",
+            (player_id,)
+        ).fetchall()
+        db.close()
+    except Exception as e:
+        if as_json:
+            return {"error": "Database error: " + str(e)}
+        print("Database error: " + str(e))
+        return
+
+    trend = [{"date": r[0], "pct_owned": r[1]} for r in rows]
+
+    if not trend:
+        result = {
+            "player_name": resolved_name,
+            "player_id": player_id,
+            "trend": [],
+            "current_pct": None,
+            "direction": "unknown",
+            "delta_7d": 0,
+            "delta_30d": 0,
+            "message": "No ownership history recorded yet. Data is collected during the season.",
+        }
+        if as_json:
+            return result
+        print("No ownership history for " + resolved_name + " (player_id=" + player_id + ")")
+        print("Data is collected during the season.")
+        return
+
+    current_pct = trend[-1].get("pct_owned", 0)
+
+    # Calculate deltas
+    delta_7d = 0
+    delta_30d = 0
+    today = date.today()
+    for entry in trend:
+        try:
+            d = datetime.strptime(entry.get("date", ""), "%Y-%m-%d").date()
+            diff = (today - d).days
+            if 6 <= diff <= 8:
+                delta_7d = round(current_pct - entry.get("pct_owned", 0), 1)
+            if 29 <= diff <= 31:
+                delta_30d = round(current_pct - entry.get("pct_owned", 0), 1)
+        except (ValueError, TypeError):
+            pass
+
+    direction = "stable"
+    if delta_7d > 2:
+        direction = "rising"
+    elif delta_7d < -2:
+        direction = "falling"
+
+    result = {
+        "player_name": resolved_name,
+        "player_id": player_id,
+        "trend": trend,
+        "current_pct": current_pct,
+        "direction": direction,
+        "delta_7d": delta_7d,
+        "delta_30d": delta_30d,
+    }
+
+    if as_json:
+        return result
+
+    print("Ownership Trends: " + resolved_name + " (id:" + player_id + ")")
+    print("=" * 50)
+    print("  Current: " + str(current_pct) + "%  Direction: " + direction)
+    print("  7-day change: " + str(delta_7d) + "%  30-day change: " + str(delta_30d) + "%")
+    print("")
+    for entry in trend[-14:]:
+        print("  " + entry.get("date", "?") + "  " + str(entry.get("pct_owned", 0)) + "%")
+
+
+def cmd_category_trends(args, as_json=False):
+    """Show category rank trends over time from season.db"""
+
+    try:
+        db = get_db()
+        rows = db.execute(
+            "SELECT week, category, value, rank FROM category_history ORDER BY week, category"
+        ).fetchall()
+        db.close()
+    except Exception as e:
+        if as_json:
+            return {"error": "Database error: " + str(e)}
+        print("Database error: " + str(e))
+        return
+
+    if not rows:
+        result = {
+            "categories": [],
+            "message": "No category history recorded yet. Run category-check during the season to build history.",
+        }
+        if as_json:
+            return result
+        print("No category history recorded yet.")
+        print("Run category-check during the season to build history.")
+        return
+
+    # Group by category
+    cat_data = {}
+    for week, category, value, rank in rows:
+        if category not in cat_data:
+            cat_data[category] = []
+        cat_data[category].append({"week": week, "value": value, "rank": rank})
+
+    categories = []
+    for cat_name, history in sorted(cat_data.items()):
+        ranks = [h.get("rank", 0) for h in history]
+        current_rank = ranks[-1] if ranks else 0
+        best_rank = min(ranks) if ranks else 0
+        worst_rank = max(ranks) if ranks else 0
+
+        # Determine trend from last 3 data points
+        trend_label = "stable"
+        if len(ranks) >= 3:
+            recent = ranks[-3:]
+            if recent[-1] < recent[0]:
+                trend_label = "improving"
+            elif recent[-1] > recent[0]:
+                trend_label = "declining"
+
+        categories.append({
+            "name": cat_name,
+            "history": history,
+            "current_rank": current_rank,
+            "best_rank": best_rank,
+            "worst_rank": worst_rank,
+            "trend": trend_label,
+        })
+
+    result = {"categories": categories}
+
+    if as_json:
+        return result
+
+    print("Category Rank Trends")
+    print("=" * 50)
+    for cat in categories:
+        trend_marker = ""
+        if cat.get("trend") == "improving":
+            trend_marker = " [IMPROVING]"
+        elif cat.get("trend") == "declining":
+            trend_marker = " [DECLINING]"
+        print("  " + cat.get("name", "?").ljust(12) + "Current: " + str(cat.get("current_rank", "?"))
+              + "  Best: " + str(cat.get("best_rank", "?")) + "  Worst: " + str(cat.get("worst_rank", "?"))
+              + trend_marker)
+
+
 COMMANDS = {
     "lineup-optimize": cmd_lineup_optimize,
     "category-check": cmd_category_check,
@@ -4089,6 +4290,8 @@ COMMANDS = {
     "pitcher-matchup": cmd_pitcher_matchup,
     "roster-stats": cmd_roster_stats,
     "faab-recommend": cmd_faab_recommend,
+    "ownership-trends": cmd_ownership_trends,
+    "category-trends": cmd_category_trends,
 }
 
 if __name__ == "__main__":

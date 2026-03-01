@@ -1614,12 +1614,120 @@ def cmd_generate(args):
     print("Saved to " + out_path)
 
 
+def _save_draft_day_rankings(hitters, pitchers):
+    """Save current rankings as draft-day baseline"""
+    draft_path = os.path.join(DATA_DIR, "draft_day_rankings.json")
+    data = {"hitters": [], "pitchers": [], "saved_date": str(date.today())}
+    if hitters is not None:
+        for _, row in hitters.iterrows():
+            data["hitters"].append({
+                "name": str(row.get("Name", "")),
+                "z_final": round(_safe_float(row.get("Z_Final", 0)), 2),
+                "team": str(row.get("Team", "")),
+                "pos": str(row.get("Pos", "")),
+            })
+    if pitchers is not None:
+        for _, row in pitchers.iterrows():
+            data["pitchers"].append({
+                "name": str(row.get("Name", "")),
+                "z_final": round(_safe_float(row.get("Z_Final", 0)), 2),
+                "team": str(row.get("Team", "")),
+                "pos": str(row.get("Pos", "")),
+            })
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(draft_path, "w") as f:
+        json.dump(data, f)
+
+
+def compute_zscore_shifts(count=25):
+    """Compare current z-scores to draft-day baseline. Returns biggest movers."""
+    hitters, pitchers, source = _get_loaded_data()
+    draft_path = os.path.join(DATA_DIR, "draft_day_rankings.json")
+
+    if not os.path.exists(draft_path):
+        _save_draft_day_rankings(hitters, pitchers)
+        return {"shifts": [], "note": "Draft-day baseline saved. Run again after stats accumulate."}
+
+    with open(draft_path) as f:
+        draft_data = json.load(f)
+
+    shifts = []
+    for player_type, current_df, draft_key in [("B", hitters, "hitters"), ("P", pitchers, "pitchers")]:
+        if current_df is None:
+            continue
+        draft_lookup = {}
+        for p in draft_data.get(draft_key, []):
+            draft_lookup[str(p.get("name", "")).strip().lower()] = p
+
+        for _, row in current_df.iterrows():
+            name = str(row.get("Name", "")).strip()
+            draft_info = draft_lookup.get(name.lower())
+            if not draft_info:
+                continue
+            draft_z = draft_info.get("z_final", 0)
+            current_z = round(_safe_float(row.get("Z_Final", 0)), 2)
+            delta = round(current_z - draft_z, 2)
+            if abs(delta) >= 0.75:
+                shifts.append({
+                    "name": name,
+                    "type": player_type,
+                    "team": str(row.get("Team", "")),
+                    "pos": str(row.get("Pos", "")),
+                    "draft_z": draft_z,
+                    "current_z": current_z,
+                    "delta": delta,
+                    "direction": "rising" if delta > 0 else "falling",
+                })
+
+    shifts.sort(key=lambda x: abs(x.get("delta", 0)), reverse=True)
+    return {"shifts": shifts[:count], "baseline_date": draft_data.get("saved_date", "unknown")}
+
+
+def cmd_zscore_shifts(args, as_json=False):
+    """Show biggest z-score movers since draft day"""
+    count = int(args[0]) if args else 25
+    try:
+        result = compute_zscore_shifts(count=count)
+    except Exception as e:
+        if as_json:
+            return {"error": str(e)}
+        print("Error computing z-score shifts: " + str(e))
+        return
+
+    if as_json:
+        return result
+
+    note = result.get("note")
+    if note:
+        print(note)
+        return
+
+    shifts = result.get("shifts", [])
+    baseline = result.get("baseline_date", "unknown")
+    print("Z-Score Shifts (baseline: " + baseline + ")")
+    print("-" * 75)
+    print("  #  " + "Name".ljust(25) + "Pos".ljust(8) + "Draft Z".rjust(8) + "  Now Z".rjust(8) + "  Delta".rjust(8) + "  Dir")
+    print("-" * 75)
+    for i, s in enumerate(shifts, 1):
+        arrow = "^" if s.get("direction") == "rising" else "v"
+        print(
+            "  " + str(i).rjust(2) + ". "
+            + str(s.get("name", "")).ljust(25)
+            + str(s.get("pos", "")).ljust(8)
+            + "{:.2f}".format(s.get("draft_z", 0)).rjust(8)
+            + "{:.2f}".format(s.get("current_z", 0)).rjust(8)
+            + "{:+.2f}".format(s.get("delta", 0)).rjust(8)
+            + "  " + arrow
+        )
+
+
 COMMANDS = {
     "rankings": cmd_rankings,
     "compare": cmd_compare,
     "value": cmd_value,
     "import-csv": cmd_import_csv,
     "generate": cmd_generate,
+    "zscore-shifts": cmd_zscore_shifts,
 }
 
 if __name__ == "__main__":
@@ -1632,6 +1740,7 @@ if __name__ == "__main__":
         print("  value <name>                - Player z-score breakdown")
         print("  import-csv <filepath>       - Import FanGraphs CSV projections")
         print("  generate                    - Generate rankings from projections")
+        print("  zscore-shifts [count]       - Biggest z-score movers since draft day")
         print("\nData: looks for projections_hitters.csv / projections_pitchers.csv in " + DATA_DIR)
         print("Fallback: uses player-rankings-2026.json for basic valuations")
         sys.exit(1)

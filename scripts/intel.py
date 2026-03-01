@@ -24,7 +24,8 @@ from datetime import date, datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mlb_id_cache import get_mlb_id
-from shared import MLB_API, mlb_fetch as _mlb_fetch, USER_AGENT
+import sqlite3
+from shared import MLB_API, mlb_fetch as _mlb_fetch, USER_AGENT, DATA_DIR
 
 # Current year for all API calls
 YEAR = date.today().year
@@ -37,6 +38,47 @@ TTL_REDDIT = 900          # 15 minutes
 TTL_MLB = 1800            # 30 minutes
 TTL_SPLITS = 86400        # 24 hours (splits are stable)
 TTL_WAR = 86400           # 24 hours
+
+
+# ============================================================
+# 0. Unified CacheManager (additive — existing caches untouched)
+# ============================================================
+
+class CacheManager:
+    """Unified cache for expensive API calls with TTL and stats"""
+    def __init__(self):
+        self._stores = {}
+
+    def get(self, key, ttl=3600):
+        import time as _time
+        entry = self._stores.get(key)
+        if entry is None:
+            return None
+        if (_time.time() - entry.get("time", 0)) >= ttl:
+            entry["misses"] = entry.get("misses", 0) + 1
+            return None
+        entry["hits"] = entry.get("hits", 0) + 1
+        return entry.get("data")
+
+    def set(self, key, data, ttl=3600):
+        import time as _time
+        self._stores[key] = {"data": data, "time": _time.time(), "ttl": ttl, "hits": 0, "misses": 0}
+
+    def stats(self):
+        import time as _time
+        result = {}
+        for k, v in self._stores.items():
+            age = int(_time.time() - v.get("time", 0))
+            result[k] = {"hits": v.get("hits", 0), "misses": v.get("misses", 0), "age_seconds": age, "ttl": v.get("ttl", 0), "fresh": age < v.get("ttl", 0)}
+        return result
+
+    def clear(self, key=None):
+        if key:
+            self._stores.pop(key, None)
+        else:
+            self._stores.clear()
+
+_cache_manager = CacheManager()
 
 
 # ============================================================
@@ -61,6 +103,91 @@ def _cache_get(key, ttl_seconds):
 def _cache_set(key, data):
     """Store value in cache with current timestamp"""
     _cache[key] = (data, time.time())
+
+
+# ============================================================
+# 1b. Arsenal Snapshot Database
+# ============================================================
+
+_intel_db = None
+
+
+def _get_intel_db():
+    """Get SQLite connection for intel snapshots (reuses season.db)"""
+    global _intel_db
+    if _intel_db is not None:
+        return _intel_db
+    db_path = os.path.join(DATA_DIR, "season.db")
+    _intel_db = sqlite3.connect(db_path)
+    _intel_db.execute(
+        "CREATE TABLE IF NOT EXISTS arsenal_snapshots "
+        "(player_name TEXT, date TEXT, pitch_type TEXT, "
+        "usage_pct REAL, velocity REAL, spin_rate REAL, "
+        "whiff_rate REAL, "
+        "PRIMARY KEY (player_name, date, pitch_type))"
+    )
+    _intel_db.execute(
+        "CREATE TABLE IF NOT EXISTS statcast_snapshots "
+        "(player_name TEXT, date TEXT, metric TEXT, value REAL, "
+        "PRIMARY KEY (player_name, date, metric))"
+    )
+    _intel_db.commit()
+    return _intel_db
+
+
+def _save_statcast_snapshot(name, statcast_data):
+    """Save key statcast metrics as a daily snapshot for historical comparison."""
+    if not statcast_data or statcast_data.get("error") or statcast_data.get("note"):
+        return
+    try:
+        db = _get_intel_db()
+        today_str = date.today().isoformat()
+        norm = _normalize_name(name)
+
+        # Collect metrics from the statcast result
+        metrics = {}
+        expected = statcast_data.get("expected", {})
+        if expected:
+            if expected.get("xwoba") is not None:
+                metrics["xwoba"] = expected.get("xwoba")
+            if expected.get("xba") is not None:
+                metrics["xba"] = expected.get("xba")
+            if expected.get("xslg") is not None:
+                metrics["xslg"] = expected.get("xslg")
+
+        batted = statcast_data.get("batted_ball", {})
+        if batted:
+            if batted.get("avg_exit_velo") is not None:
+                metrics["exit_velocity"] = batted.get("avg_exit_velo")
+            if batted.get("barrel_pct") is not None:
+                metrics["barrel_pct"] = batted.get("barrel_pct")
+            if batted.get("hard_hit_pct") is not None:
+                metrics["hard_hit_pct"] = batted.get("hard_hit_pct")
+
+        speed = statcast_data.get("speed", {})
+        if speed and speed.get("sprint_speed") is not None:
+            metrics["sprint_speed"] = speed.get("sprint_speed")
+
+        # Pitcher-specific from era_analysis
+        era_info = statcast_data.get("era_analysis", {})
+        if era_info:
+            if era_info.get("era") is not None:
+                metrics["era"] = era_info.get("era")
+            if era_info.get("xera") is not None:
+                metrics["xera"] = era_info.get("xera")
+
+        for metric_name, value in metrics.items():
+            try:
+                db.execute(
+                    "INSERT OR REPLACE INTO statcast_snapshots "
+                    "(player_name, date, metric, value) VALUES (?, ?, ?, ?)",
+                    (norm, today_str, metric_name, float(value))
+                )
+            except (ValueError, TypeError):
+                continue
+        db.commit()
+    except Exception as e:
+        print("Warning: _save_statcast_snapshot failed for " + str(name) + ": " + str(e))
 
 
 # ============================================================
@@ -184,6 +311,237 @@ def _fetch_savant_pitch_arsenal(player_type="pitcher"):
         + "&team=&min=10&csv=true"
     )
     return _savant_with_fallback(url_template, "savant_pitch_arsenal", player_type)
+
+
+def _fetch_pitch_arsenal_rows():
+    """Fetch raw pitch arsenal CSV rows (all rows, not indexed).
+    Returns list of dicts -- one per pitcher per pitch type.
+    Caches with same TTL as other Savant data.
+    """
+    cache_key = ("pitch_arsenal_rows", YEAR)
+    cached = _cache_get(cache_key, TTL_SAVANT)
+    if cached is not None:
+        return cached
+
+    year = YEAR
+    url = (
+        "https://baseballsavant.mlb.com/leaderboard/pitch-arsenal-stats"
+        "?type=pitcher&pitchType=&year=" + str(year)
+        + "&team=&min=10&csv=true"
+    )
+    rows = _fetch_csv(url)
+
+    # Pre-season fallback
+    if not rows and date.today().month < 5:
+        year = YEAR - 1
+        url = (
+            "https://baseballsavant.mlb.com/leaderboard/pitch-arsenal-stats"
+            "?type=pitcher&pitchType=&year=" + str(year)
+            + "&team=&min=10&csv=true"
+        )
+        rows = _fetch_csv(url)
+
+    _cache_set(cache_key, rows)
+    return rows
+
+
+def _find_player_arsenal_rows(name, rows):
+    """Find ALL pitch arsenal rows for a player (one per pitch type)"""
+    if not rows or not name:
+        return []
+    norm = _normalize_name(name)
+    matched = []
+    for row in rows:
+        row_name = (
+            row.get("last_name, first_name", "")
+            or row.get("player_name", "")
+            or ""
+        )
+        if not row_name:
+            continue
+        if _normalize_name(row_name) == norm:
+            matched.append(row)
+    # Fuzzy fallback if exact match fails
+    if not matched:
+        parts = norm.split()
+        if parts:
+            for row in rows:
+                row_name = (
+                    row.get("last_name, first_name", "")
+                    or row.get("player_name", "")
+                    or ""
+                )
+                if not row_name:
+                    continue
+                row_norm = _normalize_name(row_name)
+                if all(p in row_norm for p in parts):
+                    matched.append(row)
+    return matched
+
+
+def _build_arsenal_changes(name):
+    """Detect pitch arsenal changes over time for a pitcher.
+
+    Fetches current pitch arsenal, stores snapshot in SQLite,
+    compares vs 30+ day old snapshot to detect:
+    - Velocity changes > 1 mph
+    - Usage shifts > 5%
+    - New pitch types
+    """
+    try:
+        rows = _fetch_pitch_arsenal_rows()
+        if not rows:
+            return {"note": "No pitch arsenal data available"}
+
+        player_rows = _find_player_arsenal_rows(name, rows)
+        if not player_rows:
+            return {"note": "Player not found in pitch arsenal data"}
+
+        # Build current arsenal dict keyed by pitch_type
+        today_str = date.today().isoformat()
+        current = {}
+        db = _get_intel_db()
+
+        for row in player_rows:
+            pitch_type = row.get("pitch_type", "")
+            if not pitch_type:
+                continue
+            usage = _safe_float(row.get("pitch_usage"))
+            velo = _safe_float(row.get("pitch_velocity", row.get("velocity")))
+            spin = _safe_float(row.get("spin_rate"))
+            whiff = _safe_float(row.get("whiff_percent", row.get("whiff_pct")))
+
+            current[pitch_type] = {
+                "pitch_name": row.get("pitch_name", pitch_type),
+                "usage_pct": usage,
+                "velocity": velo,
+                "spin_rate": spin,
+                "whiff_rate": whiff,
+            }
+
+            # Save snapshot
+            try:
+                db.execute(
+                    "INSERT OR REPLACE INTO arsenal_snapshots "
+                    "(player_name, date, pitch_type, usage_pct, velocity, "
+                    "spin_rate, whiff_rate) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (_normalize_name(name), today_str, pitch_type,
+                     usage, velo, spin, whiff)
+                )
+            except Exception as e:
+                print("Warning: arsenal snapshot save failed: " + str(e))
+        db.commit()
+
+        # Query for historical snapshot (30+ days ago)
+        cutoff = (date.today() - timedelta(days=30)).isoformat()
+        try:
+            cursor = db.execute(
+                "SELECT date, pitch_type, usage_pct, velocity, spin_rate, "
+                "whiff_rate FROM arsenal_snapshots "
+                "WHERE player_name = ? AND date <= ? "
+                "ORDER BY date DESC",
+                (_normalize_name(name), cutoff)
+            )
+            hist_rows = cursor.fetchall()
+        except Exception:
+            hist_rows = []
+
+        if not hist_rows:
+            return {
+                "current": current,
+                "changes": [],
+                "note": "No historical data yet (need 30+ days of snapshots)",
+            }
+
+        # Build historical arsenal from the most recent old snapshot date
+        hist_date = hist_rows[0][0]
+        historical = {}
+        for h_row in hist_rows:
+            if h_row[0] != hist_date:
+                break
+            pitch_type = h_row[1]
+            historical[pitch_type] = {
+                "usage_pct": h_row[2],
+                "velocity": h_row[3],
+                "spin_rate": h_row[4],
+                "whiff_rate": h_row[5],
+            }
+
+        # Compare current vs historical
+        changes = []
+        all_pitch_types = set(list(current.keys()) + list(historical.keys()))
+
+        for pt in sorted(all_pitch_types):
+            cur = current.get(pt)
+            hist = historical.get(pt)
+
+            if cur and not hist:
+                changes.append({
+                    "pitch_type": pt,
+                    "pitch_name": cur.get("pitch_name", pt),
+                    "change_type": "new_pitch",
+                    "detail": "New pitch added to arsenal",
+                })
+                continue
+
+            if hist and not cur:
+                changes.append({
+                    "pitch_type": pt,
+                    "change_type": "dropped_pitch",
+                    "detail": "Pitch dropped from arsenal",
+                })
+                continue
+
+            # Both exist -- check for changes
+            pitch_name = cur.get("pitch_name", pt)
+
+            # Velocity change > 1 mph
+            cur_velo = cur.get("velocity")
+            hist_velo = hist.get("velocity")
+            if cur_velo is not None and hist_velo is not None:
+                velo_diff = round(cur_velo - hist_velo, 1)
+                if abs(velo_diff) > 1.0:
+                    direction = "gained" if velo_diff > 0 else "lost"
+                    changes.append({
+                        "pitch_type": pt,
+                        "pitch_name": pitch_name,
+                        "change_type": "velocity",
+                        "detail": (direction + " " + str(abs(velo_diff))
+                                   + " mph (" + str(hist_velo) + " -> "
+                                   + str(cur_velo) + ")"),
+                        "old_value": hist_velo,
+                        "new_value": cur_velo,
+                        "diff": velo_diff,
+                    })
+
+            # Usage shift > 5%
+            cur_usage = cur.get("usage_pct")
+            hist_usage = hist.get("usage_pct")
+            if cur_usage is not None and hist_usage is not None:
+                usage_diff = round(cur_usage - hist_usage, 1)
+                if abs(usage_diff) > 5.0:
+                    direction = "increased" if usage_diff > 0 else "decreased"
+                    changes.append({
+                        "pitch_type": pt,
+                        "pitch_name": pitch_name,
+                        "change_type": "usage",
+                        "detail": ("usage " + direction + " "
+                                   + str(abs(usage_diff)) + "% ("
+                                   + str(hist_usage) + "% -> "
+                                   + str(cur_usage) + "%)"),
+                        "old_value": hist_usage,
+                        "new_value": cur_usage,
+                        "diff": usage_diff,
+                    })
+
+        return {
+            "current": current,
+            "historical_date": hist_date,
+            "changes": changes,
+        }
+
+    except Exception as e:
+        return {"error": "Arsenal change detection failed: " + str(e)}
 
 
 def _fetch_savant_percentile_rankings(player_type):
@@ -1367,6 +1725,101 @@ def _detect_player_type(name, mlb_id):
     return "batter"  # default
 
 
+def _build_batted_ball_profile(name):
+    """Build batted ball profile for a pitcher (GB%, FB%, LD%, barrel%, hard hit%).
+
+    Fetches from FanGraphs via pybaseball pitching_stats which includes
+    GB%, FB%, LD%, Hard%, and barrel data. Uses _cache_manager for caching.
+    """
+    cache_key = "batted_ball_profile:" + _normalize_name(name)
+    cached = _cache_manager.get(cache_key, ttl=TTL_FANGRAPHS)
+    if cached is not None:
+        return cached
+
+    try:
+        from pybaseball import pitching_stats
+        year = YEAR
+        df = pitching_stats(year, qual=25)
+        if (df is None or len(df) == 0) and date.today().month < 5:
+            year = YEAR - 1
+            df = pitching_stats(year, qual=25)
+        if df is None or len(df) == 0:
+            result = {"note": "No FanGraphs pitching data available"}
+            _cache_manager.set(cache_key, result, ttl=TTL_FANGRAPHS)
+            return result
+
+        # Find the player row by name
+        norm = _normalize_name(name)
+        player_row = None
+        for _, row in df.iterrows():
+            row_name = row.get("Name", "")
+            if row_name and _normalize_name(row_name) == norm:
+                player_row = row
+                break
+        # Fuzzy fallback: partial match
+        if player_row is None:
+            parts = norm.split()
+            if parts:
+                for _, row in df.iterrows():
+                    row_name = row.get("Name", "")
+                    if row_name and all(p in _normalize_name(row_name) for p in parts):
+                        player_row = row
+                        break
+
+        if player_row is None:
+            result = {"note": "Player not found in FanGraphs pitching data"}
+            _cache_manager.set(cache_key, result, ttl=TTL_FANGRAPHS)
+            return result
+
+        gb_pct = _safe_float(player_row.get("GB%"))
+        fb_pct = _safe_float(player_row.get("FB%"))
+        ld_pct = _safe_float(player_row.get("LD%"))
+        hard_hit_pct = _safe_float(player_row.get("Hard%"))
+        # Barrel% may be in "Barrel%" column depending on pybaseball version
+        barrel_pct = _safe_float(player_row.get("Barrel%"))
+        if barrel_pct is None:
+            barrel_pct = _safe_float(player_row.get("Barrel%\xa0"))
+
+        # Compute league-wide percentile ranks for context
+        all_gb = [_safe_float(r.get("GB%")) for _, r in df.iterrows() if _safe_float(r.get("GB%")) is not None]
+        all_fb = [_safe_float(r.get("FB%")) for _, r in df.iterrows() if _safe_float(r.get("FB%")) is not None]
+        all_ld = [_safe_float(r.get("LD%")) for _, r in df.iterrows() if _safe_float(r.get("LD%")) is not None]
+        all_hard = [_safe_float(r.get("Hard%")) for _, r in df.iterrows() if _safe_float(r.get("Hard%")) is not None]
+
+        # For pitchers: high GB% is good (lower is better=False), low FB% is good,
+        # low hard hit% is good, low barrel% is good
+        gb_pct_rank = _percentile_rank(gb_pct, all_gb, higher_is_better=True)
+        fb_pct_rank = _percentile_rank(fb_pct, all_fb, higher_is_better=False)
+        hard_hit_pct_rank = _percentile_rank(hard_hit_pct, all_hard, higher_is_better=False)
+
+        # Classify pitcher profile
+        profile_type = "neutral"
+        if gb_pct is not None and gb_pct >= 50:
+            profile_type = "ground_ball"
+        elif fb_pct is not None and fb_pct >= 40:
+            profile_type = "fly_ball"
+
+        result = {
+            "gb_pct": gb_pct,
+            "fb_pct": fb_pct,
+            "ld_pct": ld_pct,
+            "barrel_pct": barrel_pct,
+            "hard_hit_pct": hard_hit_pct,
+            "gb_pct_rank": gb_pct_rank,
+            "fb_pct_rank": fb_pct_rank,
+            "hard_hit_pct_rank": hard_hit_pct_rank,
+            "profile_type": profile_type,
+            "data_season": year,
+        }
+        _cache_manager.set(cache_key, result, ttl=TTL_FANGRAPHS)
+        return result
+    except Exception as e:
+        print("Warning: _build_batted_ball_profile failed for " + str(name) + ": " + str(e))
+        result = {"error": str(e)}
+        _cache_manager.set(cache_key, result, ttl=300)
+        return result
+
+
 def _build_statcast(name, mlb_id):
     """Build statcast section of player intel"""
     try:
@@ -1517,8 +1970,19 @@ def _build_statcast(name, mlb_id):
             except Exception as e:
                 print("Warning: xERA analysis failed for " + str(name) + ": " + str(e))
 
+            # Batted ball profile (GB%, FB%, LD%, barrel%, hard hit%)
+            try:
+                bb_profile = _build_batted_ball_profile(name)
+                if bb_profile and not bb_profile.get("error") and not bb_profile.get("note"):
+                    result["batted_ball_profile"] = bb_profile
+            except Exception as e:
+                print("Warning: batted ball profile failed for " + str(name) + ": " + str(e))
+
         if not expected_row and not statcast_row and not sprint_row:
             result["note"] = "Player not found in Savant leaderboards (may not meet minimum PA/IP threshold)"
+
+        # Save daily snapshot for historical comparison
+        _save_statcast_snapshot(name, result)
 
         return result
     except Exception as e:
@@ -1859,10 +2323,10 @@ def player_intel(name, include=None):
     Get comprehensive intelligence packet for a player.
 
     include: list of sections to fetch. None = all.
-    Valid sections: 'statcast', 'trends', 'context', 'discipline', 'percentiles', 'splits'
+    Valid sections: 'statcast', 'trends', 'context', 'discipline', 'percentiles', 'splits', 'arsenal_changes'
     """
     if include is None:
-        include = ["statcast", "trends", "context", "discipline", "percentiles", "splits"]
+        include = ["statcast", "trends", "context", "discipline", "percentiles", "splits", "arsenal_changes"]
 
     result = {"name": name}
 
@@ -1887,6 +2351,14 @@ def player_intel(name, include=None):
     if "splits" in include:
         player_type = _detect_player_type(name, mlb_id)
         result["splits"] = _build_splits(name, player_type)
+
+    if "arsenal_changes" in include:
+        # Only fetch for pitchers
+        player_type = result.get("statcast", {}).get("player_type")
+        if player_type is None:
+            player_type = _detect_player_type(name, mlb_id)
+        if player_type == "pitcher":
+            result["arsenal_changes"] = _build_arsenal_changes(name)
 
     return result
 
@@ -1969,6 +2441,22 @@ def cmd_player_report(args, as_json=False):
                   + " | Spin: " + str(arsenal.get("spin_rate", "N/A")))
             print("    Whiff%: " + str(arsenal.get("whiff_pct", "N/A"))
                   + " | Put Away%: " + str(arsenal.get("put_away_pct", "N/A")))
+        bb_profile = statcast.get("batted_ball_profile", {})
+        if bb_profile and not bb_profile.get("error") and not bb_profile.get("note"):
+            profile_season = bb_profile.get("data_season", "")
+            profile_label = ""
+            if profile_season and profile_season != YEAR:
+                profile_label = " [" + str(profile_season) + " data]"
+            print("  Batted Ball Profile" + profile_label + " (" + str(bb_profile.get("profile_type", "neutral")) + "):")
+            print("    GB%: " + str(bb_profile.get("gb_pct", "N/A"))
+                  + " (pct: " + str(bb_profile.get("gb_pct_rank", "N/A")) + ")"
+                  + " | FB%: " + str(bb_profile.get("fb_pct", "N/A"))
+                  + " (pct: " + str(bb_profile.get("fb_pct_rank", "N/A")) + ")")
+            print("    LD%: " + str(bb_profile.get("ld_pct", "N/A"))
+                  + " | Hard%: " + str(bb_profile.get("hard_hit_pct", "N/A"))
+                  + " (pct: " + str(bb_profile.get("hard_hit_pct_rank", "N/A")) + ")")
+            if bb_profile.get("barrel_pct") is not None:
+                print("    Barrel%: " + str(bb_profile.get("barrel_pct")))
         if statcast.get("note"):
             print("  Note: " + statcast.get("note", ""))
 
@@ -2081,6 +2569,37 @@ def cmd_player_report(args, as_json=False):
         print("PLATOON SPLITS")
         print("-" * 30)
         print("  " + splits.get("note", ""))
+
+    arsenal_changes = intel_data.get("arsenal_changes", {})
+    if arsenal_changes and not arsenal_changes.get("error"):
+        print("")
+        print("ARSENAL CHANGES")
+        print("-" * 30)
+        current = arsenal_changes.get("current", {})
+        if current:
+            print("  Current arsenal:")
+            for pt, info in sorted(current.items()):
+                line = "    " + str(info.get("pitch_name", pt))
+                if info.get("usage_pct") is not None:
+                    line = line + " | " + str(info.get("usage_pct")) + "%"
+                if info.get("velocity") is not None:
+                    line = line + " | " + str(info.get("velocity")) + " mph"
+                if info.get("spin_rate") is not None:
+                    line = line + " | " + str(int(info.get("spin_rate"))) + " rpm"
+                if info.get("whiff_rate") is not None:
+                    line = line + " | " + str(info.get("whiff_rate")) + "% whiff"
+                print(line)
+        changes = arsenal_changes.get("changes", [])
+        hist_date = arsenal_changes.get("historical_date")
+        if changes:
+            print("  Changes vs " + str(hist_date) + ":")
+            for chg in changes:
+                label = str(chg.get("pitch_name", chg.get("pitch_type", "")))
+                print("    " + label + ": " + str(chg.get("detail", "")))
+        elif arsenal_changes.get("note"):
+            print("  " + arsenal_changes.get("note", ""))
+        elif hist_date:
+            print("  No significant changes since " + str(hist_date))
 
 
 def cmd_breakouts(args, as_json=False):
@@ -2352,6 +2871,147 @@ def cmd_transactions(args, as_json=False):
             print("    " + desc[:100])
 
 
+def cmd_statcast_compare(args, as_json=False):
+    """Compare a player's current Statcast profile vs 30/60 days ago"""
+    if not args:
+        if as_json:
+            return {"error": "Usage: statcast-compare <player_name> [days]"}
+        print("Usage: intel.py statcast-compare <player_name> [days]")
+        return
+
+    # Parse args: last arg might be days number
+    days = 30
+    name_parts = list(args)
+    if len(name_parts) > 1:
+        try:
+            maybe_days = int(name_parts[-1])
+            if maybe_days in (30, 60, 90, 120):
+                days = maybe_days
+                name_parts = name_parts[:-1]
+        except (ValueError, TypeError):
+            pass
+    name = " ".join(name_parts)
+    norm = _normalize_name(name)
+
+    try:
+        db = _get_intel_db()
+
+        # Get current values (most recent snapshot)
+        current_rows = db.execute(
+            "SELECT metric, value, date FROM statcast_snapshots "
+            "WHERE player_name = ? ORDER BY date DESC",
+            (norm,)
+        ).fetchall()
+
+        if not current_rows:
+            # No snapshots yet — try to build one now
+            mlb_id = get_mlb_id(name)
+            statcast = _build_statcast(name, mlb_id)
+            if statcast and not statcast.get("error"):
+                # Re-query after snapshot was saved
+                current_rows = db.execute(
+                    "SELECT metric, value, date FROM statcast_snapshots "
+                    "WHERE player_name = ? ORDER BY date DESC",
+                    (norm,)
+                ).fetchall()
+
+        if not current_rows:
+            msg = "No Statcast data available for " + name
+            if as_json:
+                return {"error": msg}
+            print(msg)
+            return
+
+        # Build current dict (most recent date per metric)
+        current = {}
+        current_date = None
+        for metric, value, snap_date in current_rows:
+            if metric not in current:
+                current[metric] = value
+                if current_date is None:
+                    current_date = snap_date
+
+        # Get historical values (closest to N days ago)
+        cutoff = (date.today() - timedelta(days=days)).isoformat()
+        hist_rows = db.execute(
+            "SELECT metric, value, date FROM statcast_snapshots "
+            "WHERE player_name = ? AND date <= ? ORDER BY date DESC",
+            (norm, cutoff)
+        ).fetchall()
+
+        historical = {}
+        hist_date = None
+        for metric, value, snap_date in hist_rows:
+            if metric not in historical:
+                historical[metric] = value
+                if hist_date is None:
+                    hist_date = snap_date
+
+        # Build comparison
+        comparisons = []
+        all_metrics = sorted(set(list(current.keys()) + list(historical.keys())))
+        for metric in all_metrics:
+            curr_val = current.get(metric)
+            hist_val = historical.get(metric)
+            delta = None
+            direction = None
+            if curr_val is not None and hist_val is not None:
+                delta = round(curr_val - hist_val, 3)
+                if delta > 0:
+                    direction = "up"
+                elif delta < 0:
+                    direction = "down"
+                else:
+                    direction = "same"
+            comparisons.append({
+                "metric": metric,
+                "current": round(curr_val, 3) if curr_val is not None else None,
+                "historical": round(hist_val, 3) if hist_val is not None else None,
+                "delta": delta,
+                "direction": direction,
+            })
+
+        result = {
+            "name": name,
+            "days": days,
+            "current_date": current_date,
+            "historical_date": hist_date,
+            "comparisons": comparisons,
+        }
+
+        if not historical:
+            result["note"] = "No historical data from " + str(days) + " days ago (snapshots start when player is first queried)"
+
+        if as_json:
+            return result
+
+        # CLI output
+        print("Statcast Comparison: " + name)
+        print("Current (" + str(current_date or "today") + ") vs "
+              + str(days) + " days ago (" + str(hist_date or "N/A") + ")")
+        print("=" * 55)
+        print("  " + "Metric".ljust(18) + "Current".rjust(10) + "Historical".rjust(12) + "Delta".rjust(10))
+        print("  " + "-" * 50)
+        for comp in comparisons:
+            curr_str = str(comp.get("current", "N/A"))
+            hist_str = str(comp.get("historical", "N/A"))
+            delta_str = ""
+            if comp.get("delta") is not None:
+                arrow = ""
+                if comp.get("direction") == "up":
+                    arrow = "^"
+                elif comp.get("direction") == "down":
+                    arrow = "v"
+                delta_str = arrow + str(comp.get("delta"))
+            print("  " + comp.get("metric", "").ljust(18) + curr_str.rjust(10)
+                  + hist_str.rjust(12) + delta_str.rjust(10))
+
+    except Exception as e:
+        if as_json:
+            return {"error": str(e)}
+        print("Error: " + str(e))
+
+
 # ============================================================
 # 12. COMMANDS dict + CLI dispatch
 # ============================================================
@@ -2364,6 +3024,7 @@ COMMANDS = {
     "trending": cmd_trending,
     "prospects": cmd_prospect_watch,
     "transactions": cmd_transactions,
+    "statcast-compare": cmd_statcast_compare,
 }
 
 if __name__ == "__main__":

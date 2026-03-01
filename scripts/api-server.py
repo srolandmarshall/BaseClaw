@@ -398,6 +398,16 @@ def api_projection_disagreements():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/zscore-shifts", methods=["GET"])
+def api_zscore_shifts():
+    try:
+        count = int(request.args.get("count", "25"))
+        result = valuations.compute_zscore_shifts(count=count)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/park-factors", methods=["GET"])
 def api_park_factors():
     try:
@@ -824,6 +834,27 @@ def api_faab_recommend():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/ownership-trends")
+def api_ownership_trends():
+    try:
+        name = request.args.get("name", "")
+        if not name:
+            return jsonify({"error": "name parameter required"}), 400
+        result = season_manager.cmd_ownership_trends([name], as_json=True)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/category-trends")
+def api_category_trends():
+    try:
+        result = season_manager.cmd_category_trends([], as_json=True)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/roster-history")
 def api_roster_history():
     try:
@@ -1143,6 +1174,19 @@ def api_intel_batch():
         include_str = request.args.get("include", "statcast")
         include = [s.strip() for s in include_str.split(",") if s.strip()]
         result = intel.batch_intel(name_list, include=include)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/intel/statcast-history")
+def api_intel_statcast_history():
+    try:
+        name = request.args.get("name", "")
+        if not name:
+            return jsonify({"error": "Missing name parameter"}), 400
+        days = request.args.get("days", "30")
+        result = intel.cmd_statcast_compare([name, days], as_json=True)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1567,6 +1611,27 @@ def api_player_tier():
         if result is None:
             return jsonify({"error": "Player not found: " + name}), 404
         return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/cache-stats", methods=["GET"])
+def api_cache_stats():
+    try:
+        from intel import _cache_manager
+        return jsonify(_cache_manager.stats())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/cache-clear", methods=["POST"])
+def api_cache_clear():
+    try:
+        from intel import _cache_manager
+        data = request.get_json(silent=True) or {}
+        key = data.get("key")
+        _cache_manager.clear(key)
+        return jsonify({"cleared": key or "all"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

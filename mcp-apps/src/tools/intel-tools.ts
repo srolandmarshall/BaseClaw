@@ -14,6 +14,7 @@ import {
   type TrendingResponse,
   type ProspectWatchResponse,
   type IntelTransactionsResponse,
+  type StatcastCompareResponse,
 } from "../api/types.js";
 
 const INTEL_URI = "ui://fbb-mcp/intel.html";
@@ -262,6 +263,57 @@ export function registerIntelTools(server: McpServer, distDir: string) {
         return {
           content: [{ type: "text" as const, text: lines.join("\n") }],
           structuredContent: { type: "intel-transactions", ai_recommendation, ...data },
+        };
+      } catch (e) { return toolError(e); }
+    },
+  );
+
+  // yahoo_statcast_history
+  registerAppTool(
+    server,
+    "yahoo_statcast_history",
+    {
+      description: "Compare a player's Statcast profile now vs 30/60 days ago — track changes in exit velo, barrel rate, xwOBA, sprint speed, and more over time",
+      inputSchema: {
+        player_name: z.string().describe("Player name to look up"),
+        days_ago: z.number().describe("How many days back to compare (30 or 60)").default(30),
+      },
+      annotations: { readOnlyHint: true },
+      _meta: { ui: { resourceUri: INTEL_URI } },
+    },
+    async ({ player_name, days_ago }) => {
+      try {
+        var data = await apiGet<StatcastCompareResponse>("/api/intel/statcast-history", { name: player_name, days: String(days_ago) });
+        var lines = ["Statcast History: " + str(data.name)];
+        lines.push("Current (" + str(data.current_date || "today") + ") vs " + str(data.days) + " days ago (" + str(data.historical_date || "N/A") + ")");
+        lines.push("");
+        lines.push("  " + "Metric".padEnd(18) + "Current".padStart(10) + "Historical".padStart(12) + "Delta".padStart(10));
+        lines.push("  " + "-".repeat(50));
+        var comparisons = data.comparisons || [];
+        for (var i = 0; i < comparisons.length; i++) {
+          var comp = comparisons[i];
+          var currStr = comp.current != null ? String(comp.current) : "N/A";
+          var histStr = comp.historical != null ? String(comp.historical) : "N/A";
+          var deltaStr = "";
+          if (comp.delta != null) {
+            var arrow = "";
+            if (comp.direction === "up") { arrow = "^"; }
+            else if (comp.direction === "down") { arrow = "v"; }
+            deltaStr = arrow + String(comp.delta);
+          }
+          lines.push("  " + str(comp.metric).padEnd(18) + currStr.padStart(10) + histStr.padStart(12) + deltaStr.padStart(10));
+        }
+        if (comparisons.length === 0) {
+          lines.push("  No comparison data available yet.");
+        }
+        if (data.note) {
+          lines.push("");
+          lines.push("Note: " + data.note);
+        }
+        var ai_recommendation: string | null = null;
+        return {
+          content: [{ type: "text" as const, text: lines.join("\n") }],
+          structuredContent: { type: "intel-statcast-history", ai_recommendation, ...data },
         };
       } catch (e) { return toolError(e); }
     },

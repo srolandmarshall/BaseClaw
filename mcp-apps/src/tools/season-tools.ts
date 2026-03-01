@@ -44,6 +44,8 @@ import {
   type PitcherMatchupResponse,
   type RosterStatsResponse,
   type FaabRecommendResponse,
+  type OwnershipTrendsResponse,
+  type CategoryTrendsResponse,
 } from "../api/types.js";
 
 export const SEASON_URI = "ui://fbb-mcp/season.html";
@@ -862,6 +864,87 @@ export function registerSeasonTools(server: McpServer, distDir: string, writesEn
         return {
           content: [{ type: "text" as const, text: lines.join("\n") }],
           structuredContent: { type: "faab-recommend", ai_recommendation, ...data },
+        };
+      } catch (e) { return toolError(e); }
+    },
+  );
+
+  // yahoo_ownership_trends
+  registerAppTool(
+    server,
+    "yahoo_ownership_trends",
+    {
+      description: "Show ownership % trend over time for a player. Tracks rising/falling ownership from season.db history.",
+      inputSchema: { player_name: z.string().describe("Name of the player to look up") },
+      annotations: { readOnlyHint: true },
+      _meta: { ui: { resourceUri: SEASON_URI } },
+    },
+    async ({ player_name }) => {
+      try {
+        var data = await apiGet<OwnershipTrendsResponse>("/api/ownership-trends", { name: player_name });
+        if ((data as any).error) {
+          return toolError((data as any).error);
+        }
+        var lines = ["Ownership Trends: " + str(data.player_name) + " (id:" + str(data.player_id) + ")"];
+        if (!data.trend || data.trend.length === 0) {
+          lines.push(data.message || "No ownership history recorded yet.");
+        } else {
+          lines.push("Current: " + str(data.current_pct) + "%  Direction: " + str(data.direction));
+          lines.push("7-day change: " + str(data.delta_7d) + "%  30-day change: " + str(data.delta_30d) + "%");
+          lines.push("");
+          for (var entry of data.trend.slice(-14)) {
+            lines.push("  " + str(entry.date) + "  " + str(entry.pct_owned) + "%");
+          }
+        }
+        var ai_recommendation = data.trend && data.trend.length > 0
+          ? str(data.player_name) + " ownership is " + str(data.direction) + " at " + str(data.current_pct) + "% (7d: " + (data.delta_7d >= 0 ? "+" : "") + str(data.delta_7d) + "%)."
+          : "No ownership history available yet for " + str(data.player_name) + ".";
+        return {
+          content: [{ type: "text" as const, text: lines.join("\n") }],
+          structuredContent: { type: "ownership-trends", ai_recommendation, ...data },
+        };
+      } catch (e) { return toolError(e); }
+    },
+  );
+
+  // yahoo_category_trends
+  registerAppTool(
+    server,
+    "yahoo_category_trends",
+    {
+      description: "Show your team's category rank trends over time from season.db history. See which categories are improving or declining.",
+      annotations: { readOnlyHint: true },
+      _meta: { ui: { resourceUri: SEASON_URI } },
+    },
+    async () => {
+      try {
+        var data = await apiGet<CategoryTrendsResponse>("/api/category-trends");
+        if ((data as any).error) {
+          return toolError((data as any).error);
+        }
+        var lines = ["Category Rank Trends:"];
+        if (!data.categories || data.categories.length === 0) {
+          lines.push(data.message || "No category history recorded yet.");
+        } else {
+          lines.push("  " + "Category".padEnd(12) + "Current".padStart(8) + "Best".padStart(6) + "Worst".padStart(7) + "  Trend");
+          lines.push("  " + "-".repeat(45));
+          for (var cat of data.categories) {
+            var trendMarker = "";
+            if (cat.trend === "improving") trendMarker = "IMPROVING";
+            else if (cat.trend === "declining") trendMarker = "DECLINING";
+            else trendMarker = "stable";
+            lines.push("  " + str(cat.name).padEnd(12) + str(cat.current_rank).padStart(8) + str(cat.best_rank).padStart(6) + str(cat.worst_rank).padStart(7) + "  " + trendMarker);
+          }
+        }
+        var improving = (data.categories || []).filter((c) => c.trend === "improving").map((c) => c.name);
+        var declining = (data.categories || []).filter((c) => c.trend === "declining").map((c) => c.name);
+        var ai_recommendation = data.categories && data.categories.length > 0
+          ? "Category trends: " + (improving.length > 0 ? "Improving: " + improving.join(", ") + ". " : "")
+            + (declining.length > 0 ? "Declining: " + declining.join(", ") + "." : "All stable or improving.")
+          : "No category history available yet. Run category-check during the season to build history.";
+        return {
+          content: [{ type: "text" as const, text: lines.join("\n") }],
+          structuredContent: { type: "category-trends", ai_recommendation, ...data },
         };
       } catch (e) { return toolError(e); }
     },

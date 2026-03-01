@@ -792,6 +792,24 @@ export interface IntelTransactionsResponse {
   transactions: ProspectTransaction[];
 }
 
+export interface StatcastComparison {
+  metric: string;
+  current: number | null;
+  historical: number | null;
+  delta: number | null;
+  direction: string | null;
+}
+
+export interface StatcastCompareResponse {
+  name: string;
+  days: number;
+  current_date: string | null;
+  historical_date: string | null;
+  comparisons: StatcastComparison[];
+  note?: string;
+  error?: string;
+}
+
 export interface BatchIntelResponse {
   [playerName: string]: PlayerIntel;
 }
@@ -1101,6 +1119,44 @@ export interface FaabRecommendResponse {
   reasoning: string[];
   category_impact: Record<string, { add_z: number; drop_z: number; delta: number; direction: string }>;
   improving_categories: string[];
+}
+
+// Ownership Trends response
+export interface OwnershipTrendEntry {
+  date: string;
+  pct_owned: number;
+}
+
+export interface OwnershipTrendsResponse {
+  player_name: string;
+  player_id: string;
+  trend: OwnershipTrendEntry[];
+  current_pct: number | null;
+  direction: string;
+  delta_7d: number;
+  delta_30d: number;
+  message?: string;
+}
+
+// Category Trends response
+export interface CategoryHistoryEntry {
+  week: number;
+  value: number;
+  rank: number;
+}
+
+export interface CategoryTrend {
+  name: string;
+  history: CategoryHistoryEntry[];
+  current_rank: number;
+  best_rank: number;
+  worst_rank: number;
+  trend: string;
+}
+
+export interface CategoryTrendsResponse {
+  categories: CategoryTrend[];
+  message?: string;
 }
 
 // --- News response types ---

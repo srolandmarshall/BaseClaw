@@ -191,6 +191,50 @@ export function registerValuationsTools(server: McpServer, distDir: string) {
     },
   );
 
+  // yahoo_zscore_shifts
+  registerAppTool(
+    server,
+    "yahoo_zscore_shifts",
+    {
+      description: "Show players whose z-score value has shifted most since draft day. Identifies rising and falling players by comparing current rest-of-season valuations to the draft-day baseline.",
+      inputSchema: {
+        count: z.number().describe("Number of biggest movers to return").default(25),
+      },
+      annotations: { readOnlyHint: true },
+      _meta: { ui: { resourceUri: VALUATIONS_URI } },
+    },
+    async ({ count }) => {
+      try {
+        var data = await apiGet<any>("/api/zscore-shifts", { count: String(count) });
+        var note = data.note;
+        if (note) {
+          return {
+            content: [{ type: "text" as const, text: note }],
+            structuredContent: { type: "zscore-shifts", note },
+          };
+        }
+        var shifts = data.shifts || [];
+        var baseline = data.baseline_date || "unknown";
+        var lines = ["Z-Score Shifts (baseline: " + baseline + "):"];
+        for (var s of shifts) {
+          var arrow = s.direction === "rising" ? "^" : "v";
+          lines.push(
+            "  " + str(s.name).padEnd(25)
+            + " " + str(s.pos).padEnd(8)
+            + " draft=" + s.draft_z.toFixed(2)
+            + " now=" + s.current_z.toFixed(2)
+            + " delta=" + (s.delta > 0 ? "+" : "") + s.delta.toFixed(2)
+            + " " + arrow
+          );
+        }
+        return {
+          content: [{ type: "text" as const, text: lines.join("\n") }],
+          structuredContent: { type: "zscore-shifts", baseline_date: baseline, shifts },
+        };
+      } catch (e) { return toolError(e); }
+    },
+  );
+
   // yahoo_projection_disagreements
   registerAppTool(
     server,
