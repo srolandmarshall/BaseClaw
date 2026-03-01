@@ -1958,7 +1958,7 @@ def _build_statcast(name, mlb_id):
                         "xera_source": "SIERA",
                     }
             except Exception as e:
-                print("Warning: xERA analysis failed for " + str(name) + ": " + str(e))
+                print("Warning: SIERA analysis failed for " + str(name) + ": " + str(e))
 
             # Batted ball profile (GB%, FB%, LD%, barrel%, hard hit%)
             try:
@@ -2102,13 +2102,13 @@ def _build_trends(name, mlb_id):
                             trend_notes.append(
                                 "ERA regression candidate (buy): ERA "
                                 + str(round(era_val, 2))
-                                + " vs xERA " + str(round(siera_val, 2))
+                                + " vs SIERA " + str(round(siera_val, 2))
                             )
                         elif era_diff < -0.5:
                             trend_notes.append(
                                 "ERA regression candidate (sell): ERA "
                                 + str(round(era_val, 2))
-                                + " vs xERA " + str(round(siera_val, 2))
+                                + " vs SIERA " + str(round(siera_val, 2))
                             )
                         if trend_notes:
                             result["trend_notes"] = trend_notes

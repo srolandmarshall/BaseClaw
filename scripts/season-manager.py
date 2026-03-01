@@ -1029,6 +1029,22 @@ def cmd_waiver_analyze(args, as_json=False):
     # Sort by score
     scored.sort(key=lambda x: -x["score"])
 
+    # Record ownership snapshots for trend tracking
+    try:
+        db = get_db()
+        for p in scored:
+            pid = str(p.get("pid", ""))
+            pct_val = float(p.get("pct", 0)) if p.get("pct") is not None else 0
+            if pid:
+                db.execute(
+                    "INSERT OR REPLACE INTO ownership_history (player_id, date, pct_owned) VALUES (?, date('now'), ?)",
+                    (pid, pct_val)
+                )
+        db.commit()
+        db.close()
+    except Exception:
+        pass
+
     if as_json:
         enrich_with_intel(scored, count, boost_scores=True)
         enrich_with_trends(scored, count)
@@ -6329,7 +6345,8 @@ def cmd_trash_talk(args, as_json=False):
 
 
 def cmd_rival_history(args, as_json=False):
-    """Show head-to-head record against each league opponent with detailed matchup history"""
+    """Show head-to-head record against each league opponent with detailed matchup history.
+    Supports cross-season history when config/league-history.json exists."""
     if not as_json:
         print("Rival History")
         print("=" * 50)
@@ -6352,30 +6369,25 @@ def cmd_rival_history(args, as_json=False):
         stat_cats = []
         stat_id_to_name = {}
 
-    # Get our team name
+    # Get our team name and manager GUID for cross-season matching
     my_team_name = ""
+    my_manager_guid = ""
     try:
         teams = lg.teams()
         for tk, td in teams.items():
             if TEAM_ID in str(tk):
                 my_team_name = td.get("name", "")
+                managers = td.get("managers", [])
+                if isinstance(managers, list):
+                    for mgr in managers:
+                        m = mgr.get("manager", mgr) if isinstance(mgr, dict) else {}
+                        guid = m.get("guid", "")
+                        if guid:
+                            my_manager_guid = guid
+                            break
                 break
     except Exception:
         pass
-
-    # Get current week to know how many weeks to scan
-    try:
-        current_week = lg.current_week()
-    except Exception:
-        current_week = 1
-
-    # Scan completed weeks (1 through current_week - 1)
-    last_completed = current_week - 1
-    if last_completed < 1:
-        if as_json:
-            return {"your_team": my_team_name, "rivals": [], "error": "No completed weeks yet"}
-        print("No completed weeks yet")
-        return
 
     # Helpers to extract data from Yahoo nested matchup structure
     def _extract_name(tdata):
@@ -6412,85 +6424,162 @@ def cmd_rival_history(args, as_json=False):
                         stats[sid] = val
         return stats
 
-    # Collect all matchup results across weeks
-    all_matchups = []  # list of {week, opp_name, wins, losses, ties, cat_detail}
-
-    for week_num in range(1, last_completed + 1):
-        try:
-            raw = lg.matchups(week=week_num)
-        except Exception:
-            continue
-
-        if not raw:
-            continue
-
-        try:
-            league_data = raw.get("fantasy_content", {}).get("league", [])
-            if len(league_data) < 2:
+    def _scan_league_matchups(league_obj, team_id_str, max_weeks, year_label=None):
+        """Scan a league's matchups and return list of matchup results"""
+        results = []
+        for week_num in range(1, max_weeks + 1):
+            try:
+                raw = league_obj.matchups(week=week_num)
+            except Exception:
                 continue
-            sb_data = league_data[1].get("scoreboard", {})
-            matchup_block = sb_data.get("0", {}).get("matchups", {})
-            count = int(matchup_block.get("count", 0))
 
-            for i in range(count):
-                matchup = matchup_block.get(str(i), {}).get("matchup", {})
-                teams_data = matchup.get("0", {}).get("teams", {})
-                team1_data = teams_data.get("0", {})
-                team2_data = teams_data.get("1", {})
+            if not raw:
+                continue
 
-                key1 = _extract_key(team1_data)
-                key2 = _extract_key(team2_data)
+            try:
+                league_data = raw.get("fantasy_content", {}).get("league", [])
+                if len(league_data) < 2:
+                    continue
+                sb_data = league_data[1].get("scoreboard", {})
+                matchup_block = sb_data.get("0", {}).get("matchups", {})
+                count = int(matchup_block.get("count", 0))
 
-                if TEAM_ID not in key1 and TEAM_ID not in key2:
+                for i in range(count):
+                    matchup = matchup_block.get(str(i), {}).get("matchup", {})
+                    teams_data = matchup.get("0", {}).get("teams", {})
+                    team1_data = teams_data.get("0", {})
+                    team2_data = teams_data.get("1", {})
+
+                    key1 = _extract_key(team1_data)
+                    key2 = _extract_key(team2_data)
+
+                    if team_id_str not in key1 and team_id_str not in key2:
+                        continue
+
+                    if team_id_str in key1:
+                        my_data = team1_data
+                        opp_data = team2_data
+                    else:
+                        my_data = team2_data
+                        opp_data = team1_data
+
+                    opp_name = _extract_name(opp_data)
+                    my_key = _extract_key(my_data)
+                    my_stats = _extract_stats(my_data)
+                    opp_stats = _extract_stats(opp_data)
+
+                    stat_winners = matchup.get("stat_winners", [])
+                    wins = 0
+                    losses = 0
+                    ties = 0
+                    cat_detail = []
+
+                    for sw in stat_winners:
+                        w = sw.get("stat_winner", {})
+                        sid = str(w.get("stat_id", ""))
+                        cat_name = stat_id_to_name.get(sid, "Stat " + sid)
+                        if w.get("is_tied"):
+                            ties += 1
+                            cat_detail.append({"category": cat_name, "result": "tie", "my_value": str(my_stats.get(sid, "-")), "opp_value": str(opp_stats.get(sid, "-"))})
+                        else:
+                            winner_key = w.get("winner_team_key", "")
+                            if winner_key == my_key:
+                                wins += 1
+                                cat_detail.append({"category": cat_name, "result": "win", "my_value": str(my_stats.get(sid, "-")), "opp_value": str(opp_stats.get(sid, "-"))})
+                            else:
+                                losses += 1
+                                cat_detail.append({"category": cat_name, "result": "loss", "my_value": str(my_stats.get(sid, "-")), "opp_value": str(opp_stats.get(sid, "-"))})
+
+                    results.append({
+                        "week": week_num,
+                        "year": year_label,
+                        "opp_name": opp_name,
+                        "wins": wins,
+                        "losses": losses,
+                        "ties": ties,
+                        "cat_detail": cat_detail,
+                    })
+                    break
+            except Exception:
+                continue
+        return results
+
+    # Collect all matchup results — current season first
+    all_matchups = []
+
+    # Current season
+    try:
+        current_week = lg.current_week()
+    except Exception:
+        current_week = 1
+
+    last_completed = current_week - 1
+    current_year = str(datetime.now().year)
+
+    if last_completed >= 1:
+        all_matchups.extend(_scan_league_matchups(lg, TEAM_ID, last_completed, current_year))
+
+    # Cross-season history from league-history.json (cap at 5 most recent seasons)
+    max_hist_seasons = 5
+    seasons_scanned = [current_year]
+    try:
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config", "league-history.json")
+        with open(config_path, "r") as f:
+            league_keys = json.load(f)
+
+        hist_count = 0
+        for year_str, league_key in sorted(league_keys.items(), reverse=True):
+            if year_str == current_year:
+                continue  # Already scanned
+            if hist_count >= max_hist_seasons:
+                break
+            try:
+                hist_sc = get_connection()
+                hist_gm = yfa.Game(hist_sc, "mlb")
+                hist_lg = hist_gm.to_league(league_key)
+
+                # Find our team key in historical league
+                hist_team_id = ""
+                try:
+                    hist_teams = hist_lg.teams()
+                    # Match by manager GUID (most reliable across seasons)
+                    if my_manager_guid:
+                        for tk, td in hist_teams.items():
+                            managers = td.get("managers", [])
+                            if isinstance(managers, list):
+                                for mgr in managers:
+                                    m = mgr.get("manager", mgr) if isinstance(mgr, dict) else {}
+                                    if m.get("guid", "") == my_manager_guid:
+                                        hist_team_id = str(tk)
+                                        break
+                            if hist_team_id:
+                                break
+                    # Fallback: match by team name
+                    if not hist_team_id and my_team_name:
+                        for tk, td in hist_teams.items():
+                            if td.get("name", "") == my_team_name:
+                                hist_team_id = str(tk)
+                                break
+                except Exception:
                     continue
 
-                # Found our matchup
-                if TEAM_ID in key1:
-                    my_data = team1_data
-                    opp_data = team2_data
-                else:
-                    my_data = team2_data
-                    opp_data = team1_data
+                if not hist_team_id:
+                    continue
 
-                opp_name = _extract_name(opp_data)
-                my_key = _extract_key(my_data)
-                my_stats = _extract_stats(my_data)
-                opp_stats = _extract_stats(opp_data)
+                # Try to get end week, default to 22 (typical regular season length)
+                try:
+                    end_week = hist_lg.end_week()
+                except Exception:
+                    end_week = 22
 
-                # Count wins/losses/ties from stat_winners
-                stat_winners = matchup.get("stat_winners", [])
-                wins = 0
-                losses = 0
-                ties = 0
-                cat_detail = []  # per-category results for detail mode
-
-                for sw in stat_winners:
-                    w = sw.get("stat_winner", {})
-                    sid = str(w.get("stat_id", ""))
-                    cat_name = stat_id_to_name.get(sid, "Stat " + sid)
-                    if w.get("is_tied"):
-                        ties += 1
-                        cat_detail.append({"category": cat_name, "result": "tie", "my_value": str(my_stats.get(sid, "-")), "opp_value": str(opp_stats.get(sid, "-"))})
-                    else:
-                        winner_key = w.get("winner_team_key", "")
-                        if winner_key == my_key:
-                            wins += 1
-                            cat_detail.append({"category": cat_name, "result": "win", "my_value": str(my_stats.get(sid, "-")), "opp_value": str(opp_stats.get(sid, "-"))})
-                        else:
-                            losses += 1
-                            cat_detail.append({"category": cat_name, "result": "loss", "my_value": str(my_stats.get(sid, "-")), "opp_value": str(opp_stats.get(sid, "-"))})
-
-                all_matchups.append({
-                    "week": week_num,
-                    "opp_name": opp_name,
-                    "wins": wins,
-                    "losses": losses,
-                    "ties": ties,
-                    "cat_detail": cat_detail,
-                })
-                break  # Only one matchup per week for our team
-        except Exception:
-            continue
+                hist_matchups = _scan_league_matchups(hist_lg, hist_team_id, end_week, year_str)
+                all_matchups.extend(hist_matchups)
+                seasons_scanned.append(year_str)
+                hist_count += 1
+            except Exception:
+                continue
+    except Exception:
+        pass  # No league-history.json or read error — current season only
 
     if not all_matchups:
         if as_json:
@@ -6503,7 +6592,7 @@ def cmd_rival_history(args, as_json=False):
     for m in all_matchups:
         opp = m.get("opp_name", "?")
         if opp not in rival_data:
-            rival_data[opp] = {"wins": 0, "losses": 0, "ties": 0, "matchups": []}
+            rival_data[opp] = {"wins": 0, "losses": 0, "ties": 0, "matchups": [], "seasons": {}}
         # Determine matchup-level result
         if m.get("wins", 0) > m.get("losses", 0):
             rival_data[opp]["wins"] += 1
@@ -6515,9 +6604,21 @@ def cmd_rival_history(args, as_json=False):
             rival_data[opp]["ties"] += 1
             result = "tie"
 
+        # Track per-season records
+        yr = str(m.get("year", current_year))
+        if yr not in rival_data[opp]["seasons"]:
+            rival_data[opp]["seasons"][yr] = {"wins": 0, "losses": 0, "ties": 0}
+        if result == "win":
+            rival_data[opp]["seasons"][yr]["wins"] += 1
+        elif result == "loss":
+            rival_data[opp]["seasons"][yr]["losses"] += 1
+        else:
+            rival_data[opp]["seasons"][yr]["ties"] += 1
+
         score_str = str(m.get("wins", 0)) + "-" + str(m.get("losses", 0)) + "-" + str(m.get("ties", 0))
         rival_data[opp]["matchups"].append({
             "week": m.get("week"),
+            "year": yr,
             "score": score_str,
             "result": result,
             "cat_detail": m.get("cat_detail", []),
@@ -6699,6 +6800,17 @@ def cmd_rival_history(args, as_json=False):
             last_result = r[0].upper() + " " + last_mu.get("score", "")
             last_week = last_mu.get("week", 0)
 
+        # Per-season breakdown
+        season_list = []
+        for yr in sorted(rd.get("seasons", {}).keys(), reverse=True):
+            s = rd["seasons"][yr]
+            season_list.append({
+                "year": yr,
+                "wins": s.get("wins", 0),
+                "losses": s.get("losses", 0),
+                "ties": s.get("ties", 0),
+            })
+
         rivals.append({
             "opponent": opp,
             "record": record_str,
@@ -6708,11 +6820,13 @@ def cmd_rival_history(args, as_json=False):
             "last_result": last_result,
             "last_week": last_week,
             "dominance": dominance,
+            "seasons": season_list,
         })
 
     result = {
         "your_team": my_team_name,
         "rivals": rivals,
+        "seasons_scanned": sorted(seasons_scanned, reverse=True),
     }
 
     if as_json:

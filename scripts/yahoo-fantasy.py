@@ -9,7 +9,7 @@ import yahoo_fantasy_api as yfa
 from mlb_id_cache import get_mlb_id
 from shared import (
     get_connection, get_league, get_league_context, get_team_key,
-    LEAGUE_ID, TEAM_ID, GAME_KEY,
+    LEAGUE_ID, TEAM_ID, GAME_KEY, DATA_DIR,
     enrich_with_intel, enrich_with_trends,
 )
 
@@ -1061,6 +1061,24 @@ def cmd_transaction_trends(args, as_json=False):
 
     most_added = _parse_trend_players(added_raw) if added_raw else []
     most_dropped = _parse_trend_players(dropped_raw) if dropped_raw else []
+
+    # Record ownership snapshots for trend tracking
+    try:
+        import sqlite3
+        db_path = os.path.join(DATA_DIR, "season.db")
+        db = sqlite3.connect(db_path)
+        for p in most_added + most_dropped:
+            pid = str(p.get("player_id", ""))
+            pct_val = float(p.get("percent_owned", 0)) if p.get("percent_owned") is not None else 0
+            if pid:
+                db.execute(
+                    "INSERT OR REPLACE INTO ownership_history (player_id, date, pct_owned) VALUES (?, date('now'), ?)",
+                    (pid, pct_val)
+                )
+        db.commit()
+        db.close()
+    except Exception:
+        pass
 
     if as_json:
         return {"most_added": most_added, "most_dropped": most_dropped}

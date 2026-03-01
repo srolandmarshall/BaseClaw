@@ -41,13 +41,13 @@ Claude calls the MCP tools to pull live data, run analysis, and take action on y
 
 1. **Yahoo Fantasy API** — Your roster, standings, matchups, free agents, transactions, and league settings come from Yahoo's OAuth API in real time. Every tool call fetches current data, not cached snapshots.
 
-2. **Analytics engine** — Z-score valuations tuned to your league's stat categories, powered by Steamer projections auto-fetched from FanGraphs (with in-season blending of projections + live stats weighted by games played). Category gap analysis to find your weaknesses, H2H matchup strategy (target/protect/concede/lock), trade evaluation with positional scarcity, and a trade finder that scans every team for complementary deals.
+2. **Analytics engine** — Z-score valuations tuned to your league's stat categories, powered by consensus projections (Steamer + ZiPS + Depth Charts blended) auto-fetched from FanGraphs, with park factor adjustments, rest-of-season valuation tracking, and in-season blending of projections + live stats weighted by games played. Category gap analysis, punt strategy advisor, playoff path planner, trade package builder, FAAB bid recommendations, and a trade finder that scans every team for complementary deals.
 
-3. **Player intelligence** — Every player surface is enriched with Statcast data (xwOBA, exit velocity, barrel rate, percentile rankings, pitch arsenal), recent trend splits (7/14/30 day), plate discipline metrics (FanGraphs), Reddit sentiment from r/fantasybaseball, and MLB transaction alerts. Before the season starts, Savant data automatically falls back to the prior year so intel surfaces stay populated during spring training.
+3. **Player intelligence** — Every player surface is enriched with Statcast data (xwOBA, xERA, exit velocity, barrel rate, percentile rankings, pitch arsenal, batted ball profile), platoon splits (vs LHP/RHP), historical Statcast comparisons, arsenal change detection, recent trend splits (7/14/30 day), plate discipline metrics (FanGraphs), Reddit sentiment from r/fantasybaseball, and MLB transaction alerts. Expensive API calls are cached with configurable TTL. Before the season starts, Savant data automatically falls back to the prior year so intel surfaces stay populated during spring training.
 
 4. **Browser automation** — Write operations (add, drop, trade, lineup changes) use Playwright to automate the Yahoo Fantasy website directly, since Yahoo's API no longer grants write scope to new developer apps. Read operations still use the fast OAuth API.
 
-5. **Inline UI apps** — Tool results aren't just text. Eight Preact + Tailwind HTML apps with 62 views render interactive tables, charts, and dashboards directly inside Claude's response using MCP Apps (`@modelcontextprotocol/ext-apps`).
+5. **Inline UI apps** — Tool results aren't just text. Nine Preact + Tailwind + Recharts HTML apps with 62 views render interactive tables, charts, radar plots, heatmaps, and dashboards directly inside Claude's response using MCP Apps (`@modelcontextprotocol/ext-apps`).
 
 6. **Workflow tools for agents** — Six aggregated tools (`yahoo_morning_briefing`, `yahoo_league_landscape`, etc.) each combine 5-7+ individual API calls server-side and return concise, decision-ready output in a single tool call. Designed for autonomous agents that need to minimize token usage and tool call count — a full daily routine takes just 2-3 tool calls instead of 15+.
 
@@ -172,7 +172,7 @@ This opens a browser — log into Yahoo manually. The session saves to `config/y
 
 ### 6. Enable preview dashboard (optional)
 
-To browse all 62 UI views in your browser, set `ENABLE_PREVIEW=true` in `.env` and rebuild:
+To browse all UI views in your browser, set `ENABLE_PREVIEW=true` in `.env` and rebuild:
 
 ```bash
 docker compose up -d --build
@@ -401,10 +401,10 @@ The server exposes a `GET /health` endpoint (unauthenticated) that returns `{ ok
 
 ## MCP Tools
 
-82 total tools (69 read-only + 13 write operations), each with rich inline HTML UI apps rendered directly in Claude.
+108 total tools (93 read-only + 15 write operations) across 10 tool files, each with rich inline HTML UI apps rendered directly in Claude.
 
 <details>
-<summary><strong>Roster Management</strong> (15 tools)</summary>
+<summary><strong>Roster Management</strong> (16 tools)</summary>
 
 | Tool | Description |
 |------|-------------|
@@ -412,6 +412,7 @@ The server exposes a `GET /health` endpoint (unauthenticated) that returns `{ ok
 | `yahoo_free_agents` | List top free agents (batters or pitchers) |
 | `yahoo_search` | Search for a player by name among free agents |
 | `yahoo_who_owns` | Check who owns a specific player by player ID |
+| `yahoo_percent_owned` | Ownership percentage for specific players across Yahoo |
 | `yahoo_add` | Add a free agent to your roster |
 | `yahoo_drop` | Drop a player from your roster |
 | `yahoo_swap` | Atomic add+drop: add one player and drop another |
@@ -435,7 +436,7 @@ The server exposes a `GET /health` endpoint (unauthenticated) that returns `{ ok
 | `yahoo_matchups` | Weekly H2H matchup pairings |
 | `yahoo_scoreboard` | Live scoring overview for the current week |
 | `yahoo_my_matchup` | Detailed H2H matchup with per-category comparison |
-| `yahoo_info` | League settings and team info |
+| `yahoo_info` | League settings, team info, waiver priority, and FAAB budget |
 | `yahoo_transactions` | Recent league transactions (add, drop, trade) |
 | `yahoo_stat_categories` | League scoring categories |
 | `yahoo_transaction_trends` | Most added and most dropped players across Yahoo |
@@ -446,7 +447,7 @@ The server exposes a `GET /health` endpoint (unauthenticated) that returns `{ ok
 </details>
 
 <details>
-<summary><strong>In-Season Management</strong> (21 tools)</summary>
+<summary><strong>In-Season Management</strong> (32 tools)</summary>
 
 | Tool | Description |
 |------|-------------|
@@ -467,26 +468,40 @@ The server exposes a `GET /health` endpoint (unauthenticated) that returns `{ ok
 | `yahoo_reject_trade` | Reject a pending trade |
 | `yahoo_whats_new` | Digest of injuries, pending trades, league activity, trending pickups, prospect call-ups |
 | `yahoo_trade_finder` | Scan the league for complementary trade partners and suggest packages |
-| `yahoo_week_planner` | Games-per-day grid for your roster (off-days, two-start pitchers) |
+| `yahoo_week_planner` | Games-per-day grid with heatmap for your roster (off-days, two-start pitchers) |
 | `yahoo_closer_monitor` | Monitor closer situations — your closers, available closers, saves leaders |
 | `yahoo_pitcher_matchup` | Pitcher matchup quality for your SPs based on opponent batting stats |
 | `yahoo_roster_stats` | Per-player stat breakdown for your roster (season totals or specific week) |
+| `yahoo_faab_recommend` | FAAB bid recommendation based on budget, league spending pace, and player value |
+| `yahoo_ownership_trends` | Ownership trend data from season.db — accumulates as you use waiver/trending tools |
+| `yahoo_category_trends` | Category rank trends over time with Recharts line chart visualization |
+| `yahoo_punt_advisor` | Analyze roster construction and recommend categories to target vs. punt |
+| `yahoo_il_stash_advisor` | Cross-reference injury timelines with playoff schedule and player upside |
+| `yahoo_optimal_moves` | Multi-move optimizer — best add/drop sequence to maximize net roster z-score |
+| `yahoo_playoff_planner` | Calculate category gaps to playoff threshold and recommend specific moves |
+| `yahoo_trash_talk` | Generate league-appropriate banter based on matchup context |
+| `yahoo_rival_history` | Head-to-head record vs each manager (current season, or all-time with league-history.json) |
+| `yahoo_achievements` | Track milestones — best ERA week, longest win streak, most moves |
+| `yahoo_weekly_narrative` | Auto-generated weekly recap with category analysis and season story arc |
 
 </details>
 
 <details>
-<summary><strong>Valuations</strong> (3 tools)</summary>
+<summary><strong>Valuations</strong> (6 tools)</summary>
 
 | Tool | Description |
 |------|-------------|
-| `yahoo_rankings` | Top players ranked by z-score value |
+| `yahoo_rankings` | Top players ranked by z-score value (consensus projections, park-adjusted) |
 | `yahoo_compare` | Compare two players side by side with z-score breakdowns |
 | `yahoo_value` | Full z-score breakdown for a player across all categories |
+| `yahoo_projections_update` | Force-refresh projections from FanGraphs (consensus, steamer, zips, or fangraphsdc) |
+| `yahoo_zscore_shifts` | Players whose z-score value has shifted most since draft day (rising/falling) |
+| `yahoo_projection_disagreements` | Players where projection systems disagree most — draft sleeper/bust signals |
 
 </details>
 
 <details>
-<summary><strong>Draft</strong> (4 tools)</summary>
+<summary><strong>Draft</strong> (5 tools)</summary>
 
 | Tool | Description |
 |------|-------------|
@@ -494,26 +509,43 @@ The server exposes a `GET /health` endpoint (unauthenticated) that returns `{ ok
 | `yahoo_draft_recommend` | Draft pick recommendation with top available hitters and pitchers by z-score |
 | `yahoo_draft_cheatsheet` | Draft strategy cheat sheet with round-by-round targets |
 | `yahoo_best_available` | Best available players ranked by z-score |
+| `yahoo_draft_board` | Visual draft board tracker — grid of picks by team and round |
 
 </details>
 
 <details>
-<summary><strong>Intelligence</strong> (7 tools)</summary>
+<summary><strong>Intelligence</strong> (8 tools)</summary>
 
 | Tool | Description |
 |------|-------------|
-| `fantasy_player_report` | Deep-dive Statcast + trends + plate discipline + Reddit buzz for a player |
+| `fantasy_player_report` | Deep-dive Statcast radar chart + SIERA (expected ERA) + platoon splits + arsenal + trends + Reddit buzz |
 | `fantasy_breakout_candidates` | Players whose expected stats (xwOBA) exceed actual — positive regression candidates |
 | `fantasy_bust_candidates` | Players whose actual stats exceed expected (xwOBA) — negative regression candidates |
 | `fantasy_reddit_buzz` | What r/fantasybaseball is talking about — hot posts, trending topics |
 | `fantasy_trending_players` | Players with rising buzz on Reddit |
 | `fantasy_prospect_watch` | Recent MLB prospect call-ups and roster moves |
 | `fantasy_transactions` | Recent fantasy-relevant MLB transactions (IL, call-up, DFA, trade) |
+| `yahoo_statcast_history` | Compare a player's Statcast profile now vs. 30/60 days ago |
 
 </details>
 
 <details>
-<summary><strong>MLB Data</strong> (7 tools)</summary>
+<summary><strong>Analytics & Strategy</strong> (7 tools)</summary>
+
+| Tool | Description |
+|------|-------------|
+| `fantasy_player_news` | Latest news and updates for a specific player |
+| `fantasy_news_feed` | Fantasy-relevant news feed across all players |
+| `fantasy_probable_pitchers` | Probable pitchers for upcoming games |
+| `fantasy_schedule_analysis` | Schedule-based analysis for streaming and lineup planning |
+| `fantasy_category_impact` | Projected category rank impact of a roster move |
+| `fantasy_regression_candidates` | Players likely to regress positively or negatively based on advanced stats |
+| `fantasy_player_tier` | Player tier classification within position group |
+
+</details>
+
+<details>
+<summary><strong>MLB Data</strong> (9 tools)</summary>
 
 | Tool | Description |
 |------|-------------|
@@ -524,6 +556,8 @@ The server exposes a `GET /health` endpoint (unauthenticated) that returns `{ ok
 | `mlb_injuries` | Current MLB injuries across all teams |
 | `mlb_standings` | MLB division standings |
 | `mlb_schedule` | MLB game schedule (today or specific date) |
+| `mlb_draft` | MLB draft picks by year |
+| `yahoo_weather` | Real-time weather (temperature, wind, condition) from MLB game feed with risk assessment |
 
 </details>
 
@@ -532,9 +566,9 @@ The server exposes a `GET /health` endpoint (unauthenticated) that returns `{ ok
 
 | Tool | Description |
 |------|-------------|
-| `yahoo_league_history` | All-time season results — champions, your finishes, W-L-T records |
-| `yahoo_record_book` | All-time records — career W-L, best seasons, playoff appearances, #1 draft picks |
-| `yahoo_past_standings` | Full standings for a past season |
+| `yahoo_league_history` | All-time season results with finish position chart — champions, your finishes, W-L-T records |
+| `yahoo_record_book` | All-time records with bar charts — career W-L, best seasons, playoff appearances, #1 draft picks |
+| `yahoo_past_standings` | Full standings for a past season with win-loss stacked bar chart |
 | `yahoo_past_draft` | Draft picks for a past season with player names |
 | `yahoo_past_teams` | Team names, managers, move/trade counts for a past season |
 | `yahoo_past_trades` | Trade history for a past season |
@@ -545,9 +579,9 @@ The server exposes a `GET /health` endpoint (unauthenticated) that returns `{ ok
 
 ### Write Operations
 
-The following 13 tools require `ENABLE_WRITE_OPS=true`. When `ENABLE_WRITE_OPS=false` (default), these tools are hidden entirely. All except `yahoo_auto_lineup` also require a valid browser session.
+The following 15 tools require `ENABLE_WRITE_OPS=true`. When `ENABLE_WRITE_OPS=false` (default), these tools are hidden entirely. All except `yahoo_auto_lineup` and `yahoo_optimal_moves` also require a valid browser session.
 
-`yahoo_add`, `yahoo_drop`, `yahoo_swap`, `yahoo_waiver_claim`, `yahoo_waiver_claim_swap`, `yahoo_set_lineup`, `yahoo_propose_trade`, `yahoo_accept_trade`, `yahoo_reject_trade`, `yahoo_browser_status`, `yahoo_change_team_name`, `yahoo_change_team_logo`, `yahoo_auto_lineup`
+`yahoo_add`, `yahoo_drop`, `yahoo_swap`, `yahoo_waiver_claim`, `yahoo_waiver_claim_swap`, `yahoo_set_lineup`, `yahoo_propose_trade`, `yahoo_accept_trade`, `yahoo_reject_trade`, `yahoo_browser_status`, `yahoo_change_team_name`, `yahoo_change_team_logo`, `yahoo_auto_lineup`, `yahoo_optimal_moves`, `yahoo_projections_update`
 
 <details>
 <summary><strong>CLI Commands</strong></summary>
@@ -556,6 +590,9 @@ The `./yf` helper script provides direct CLI access to all functionality:
 
 ```
 ./yf <command> [args]
+./yf --json <command> [args]   # JSON output mode for programmatic use
+./yf api <endpoint> [params]   # Direct API calls (e.g., yf api /api/rankings)
+./yf api-list                  # List all available API endpoints
 ```
 
 | Category | Commands |
@@ -567,6 +604,7 @@ The `./yf` helper script provides direct CLI access to all functionality:
 | **In-Season** | `lineup-optimize [--apply]`, `category-check`, `injury-report`, `waiver-analyze [B\|P] [n]`, `streaming [week]`, `trade-eval <give> <get>`, `daily-update`, `roster-stats [--period season\|week] [--week N]` |
 | **MLB** | `mlb teams`, `mlb roster <tm>`, `mlb stats <id>`, `mlb schedule`, `mlb injuries` |
 | **Browser** | `browser-login`, `browser-status`, `browser-test`, `change-team-name <name>`, `change-team-logo <path>` |
+| **API** | `api <endpoint> [key=val]`, `api-list` |
 | **Docker** | `build`, `restart`, `shell`, `logs` |
 
 </details>
@@ -582,23 +620,25 @@ The `./yf` helper script provides direct CLI access to all functionality:
 │  │  (Flask :8766)    │──│  (Express :4951)    │  │
 │  │                   │  │                     │  │
 │  │  yahoo_fantasy_api│  │  MCP SDK + ext-apps │  │
-│  │  pybaseball       │  │  82 tool defs       │  │
-│  │  MLB-StatsAPI     │  │  8 apps / 62 views  │  │
+│  │  pybaseball       │  │  108 tool defs      │  │
+│  │  MLB-StatsAPI     │  │  9 apps / 62 views  │  │
 │  │  Playwright       │  │  6 workflow tools   │  │
+│  │  CacheManager     │  │  10 tool files      │  │
 │  └──────────────────┘  └─────────────────────┘  │
 └─────────────────────────────────────────────────┘
          │                        │
     Yahoo Fantasy API        MCP Clients (stdio/HTTP)
     Yahoo Website (browser)  ├── Claude Code / Desktop
-                             ├── Claude.ai (remote)
-                             └── Agent orchestrators
+    FanGraphs (projections)  ├── Claude.ai (remote)
+    Baseball Savant (intel)  └── Agent orchestrators
                                  (OpenClaw, cron-scheduled)
 ```
 
 - **Read operations**: Yahoo Fantasy OAuth API (fast, reliable)
 - **Write operations**: Playwright browser automation against Yahoo Fantasy website
-- **Valuations**: Steamer projections auto-fetched from FanGraphs, blended with live stats in-season (weighted by games played), z-scored against league categories
-- **MCP Apps**: Inline HTML UIs (Preact + Tailwind) rendered directly in Claude via `@modelcontextprotocol/ext-apps`
+- **Valuations**: Consensus projections (Steamer + ZiPS + Depth Charts) auto-fetched from FanGraphs, park-factor adjusted, blended with live stats in-season (weighted by games played), z-scored against league categories, with rest-of-season tracking and projection disagreement detection
+- **Intelligence**: Statcast data with SIERA (expected ERA), platoon splits, arsenal change detection, batted ball profiles, and historical comparison — all cached with configurable TTL
+- **MCP Apps**: Inline HTML UIs (Preact + Tailwind + Recharts) rendered directly in Claude via `@modelcontextprotocol/ext-apps`
 - **Workflow tools**: Aggregated endpoints for autonomous agents — each combines 5-7+ API calls server-side to minimize token usage
 
 ## Environment Variables
@@ -633,7 +673,7 @@ fbb-mcp/
 ├── docker-compose.yml
 ├── Dockerfile
 ├── .env.example
-├── yf                              # CLI helper script
+├── yf                              # CLI helper script (with --json and api modes)
 ├── AGENTS.md                       # Agent persona for autonomous GM
 ├── openclaw-config.yaml            # OpenClaw agent orchestrator config
 ├── openclaw-cron-examples.json     # Cron schedule examples
@@ -644,27 +684,39 @@ fbb-mcp/
 │   └── draft-cheatsheet.json       # Optional: draft strategy
 ├── data/
 │   ├── player-rankings-YYYY.json   # Optional: curated rankings
-│   ├── projections_hitters.csv     # Auto-fetched Steamer projections (gitignored)
-│   └── projections_pitchers.csv    # Auto-fetched Steamer projections (gitignored)
+│   ├── projections_hitters.csv     # Auto-fetched consensus projections (gitignored)
+│   └── projections_pitchers.csv    # Auto-fetched consensus projections (gitignored)
 ├── scripts/
 │   ├── install.sh                   # One-command installer (curl | bash)
-│   ├── api-server.py               # Flask API server (includes workflow endpoints)
+│   ├── api-server.py               # Flask API server (~60 endpoints, workflow + strategy)
 │   ├── yahoo-fantasy.py            # League management
-│   ├── season-manager.py           # In-season management
+│   ├── season-manager.py           # In-season management + strategy engine
 │   ├── draft-assistant.py          # Draft day tool
 │   ├── yahoo_browser.py            # Playwright browser automation
 │   ├── history.py                  # Historical records
-│   ├── intel.py                    # Fantasy intelligence
-│   ├── valuations.py               # Z-score valuation engine
+│   ├── intel.py                    # Fantasy intelligence (Statcast, splits, arsenal, caching)
+│   ├── valuations.py               # Z-score valuation engine (consensus, park factors, ROS tracking)
 │   ├── mlb-data.py                 # MLB Stats API helper
-│   └── mlb_id_cache.py             # Player name → MLB ID mapping
+│   ├── mlb_id_cache.py             # Player name → MLB ID mapping
+│   ├── shared.py                   # Shared utilities (team key detection, name normalization)
+│   └── openclaw-skill/             # OpenClaw automation scripts
+│       ├── api_client.py           # Shared HTTP client for automation scripts
+│       ├── config.py               # AutomationConfig (autonomy levels per action type)
+│       ├── config.yaml             # Default autonomy configuration
+│       ├── formatter.py            # Message formatter for Telegram/WhatsApp
+│       ├── daily-lineup.py         # Cron: morning lineup optimization
+│       ├── injury-monitor.py       # Cron: injury auto-response with state tracking
+│       ├── waiver-scout.py         # Cron: daily waiver wire recommendations
+│       ├── weekly-recap.py         # Cron: end-of-week narrative recap
+│       ├── manifest.json           # OpenClaw skill package manifest
+│       └── README.md               # Automation setup documentation
 └── mcp-apps/                       # TypeScript MCP server + UI apps
     ├── server.ts                   # MCP server setup + tool registration
     ├── main.ts                     # Entry point (stdio + HTTP)
     ├── assets/logo-128.png         # Server icon (pixel-art baseball)
-    ├── src/tools/                  # 9 tool files, 82 MCP tools
-    ├── src/api/                    # Python API client + format helpers
-    └── ui/                         # 8 inline HTML apps, 62 views (Preact + Tailwind)
+    ├── src/tools/                  # 10 tool files, 108 MCP tools
+    ├── src/api/                    # Python API client + type definitions
+    └── ui/                         # 9 inline HTML apps, 62 views (Preact + Tailwind + Recharts)
 ```
 
 </details>

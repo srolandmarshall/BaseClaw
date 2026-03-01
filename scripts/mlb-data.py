@@ -304,8 +304,44 @@ def _is_dome_venue(venue_name):
     return False
 
 
+def _assess_weather_risk(condition, temp, wind_str):
+    """Determine weather risk from actual weather data.
+    Returns (risk_level, note) tuple."""
+    risks = []
+    cond_lower = condition.lower() if condition else ""
+
+    # Precipitation check
+    for precip in ("rain", "drizzle", "showers", "thunderstorm", "snow"):
+        if precip in cond_lower:
+            risks.append("rain")
+            break
+
+    # Temperature check
+    try:
+        temp_f = int(temp)
+        if temp_f > 95:
+            risks.append("heat")
+        elif temp_f < 45:
+            risks.append("cold")
+    except (ValueError, TypeError):
+        pass
+
+    # Wind check — extract mph number from strings like "6 mph, In From CF"
+    try:
+        wind_mph = int(wind_str.split()[0])
+        if wind_mph > 15:
+            risks.append("wind")
+    except (ValueError, TypeError, IndexError, AttributeError):
+        pass
+
+    if not risks:
+        return "low", condition + ", " + str(temp) + "F, " + str(wind_str)
+
+    return ",".join(risks), condition + ", " + str(temp) + "F, " + str(wind_str)
+
+
 def cmd_weather(args, as_json=False):
-    """Check weather/venue risk for today's games"""
+    """Check weather/venue risk for today's games with real weather data"""
     import statsapi
 
     game_date = args[0] if args else str(date.today())
@@ -325,6 +361,7 @@ def cmd_weather(args, as_json=False):
         venue = game.get("venue_name", "")
         game_time = game.get("game_datetime", "")
         status = game.get("status", "")
+        game_id = game.get("game_id")
 
         is_dome = _is_dome_venue(venue)
 
@@ -332,14 +369,32 @@ def cmd_weather(args, as_json=False):
         if is_dome:
             weather_risk = "none"
             weather_note = "Domed/retractable roof stadium"
+            temperature = None
+            condition = None
+            wind = None
         elif status in ("Postponed", "Suspended"):
             weather_risk = "postponed"
             weather_note = "Game " + status.lower()
+            temperature = None
+            condition = None
+            wind = None
         else:
-            weather_risk = "outdoor"
-            weather_note = "Outdoor stadium - check local forecast"
+            # Fetch real weather from game feed
+            temperature = None
+            condition = None
+            wind = None
+            try:
+                feed = statsapi.get("game", {"gamePk": game_id})
+                weather_data = feed.get("gameData", {}).get("weather", {})
+                condition = weather_data.get("condition", "")
+                temperature = weather_data.get("temp", "")
+                wind = weather_data.get("wind", "")
+                weather_risk, weather_note = _assess_weather_risk(condition, temperature, wind)
+            except Exception:
+                weather_risk = "unknown"
+                weather_note = "Weather data unavailable"
 
-        games.append({
+        game_entry = {
             "away": away_team,
             "home": home_team,
             "venue": venue,
@@ -348,7 +403,15 @@ def cmd_weather(args, as_json=False):
             "is_dome": is_dome,
             "weather_risk": weather_risk,
             "weather_note": weather_note,
-        })
+        }
+        if temperature is not None:
+            game_entry["temperature"] = str(temperature)
+        if condition is not None:
+            game_entry["condition"] = condition
+        if wind is not None:
+            game_entry["wind"] = wind
+
+        games.append(game_entry)
 
     dome_count = sum(1 for g in games if g.get("is_dome"))
     result = {
@@ -364,7 +427,12 @@ def cmd_weather(args, as_json=False):
     print("Weather Risk Report - " + game_date)
     print("=" * 60)
     for g in games:
-        risk_label = "[DOME]" if g.get("is_dome") else "[OUTDOOR]"
+        if g.get("is_dome"):
+            risk_label = "[DOME]"
+        elif g.get("condition"):
+            risk_label = "[" + g.get("weather_risk", "?").upper() + "] " + g.get("condition", "") + " " + str(g.get("temperature", "")) + "F " + str(g.get("wind", ""))
+        else:
+            risk_label = "[" + g.get("weather_risk", "?").upper() + "]"
         print("  " + g.get("away", "?") + " @ " + g.get("home", "?") + " - " + g.get("venue", "?") + " " + risk_label)
     print("")
     print("  Dome/retractable: " + str(result.get("dome_count", 0)) + "  Outdoor: " + str(result.get("outdoor_count", 0)))

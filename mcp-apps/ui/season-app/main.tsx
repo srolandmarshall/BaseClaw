@@ -21,6 +21,17 @@ import { CloserMonitorView } from "./closer-monitor-view";
 import { PitcherMatchupView } from "./pitcher-matchup-view";
 import { MorningBriefingView } from "./morning-briefing-view";
 import { CategoryTrendView } from "./category-trend-view";
+import { PuntAdvisorView } from "./punt-advisor-view";
+import { PlayoffPlannerView } from "./playoff-planner-view";
+import { OptimalMovesView } from "./optimal-moves-view";
+import { ILStashAdvisorView } from "./il-stash-advisor-view";
+import { TrashTalkView } from "./trash-talk-view";
+import { RivalHistoryView } from "./rival-history-view";
+import { AchievementsView } from "./achievements-view";
+import { WeeklyNarrativeView } from "./weekly-narrative-view";
+import { FaabRecommendView } from "./faab-recommend-view";
+import { OwnershipTrendsView } from "./ownership-trends-view";
+import { RosterStatsView } from "./roster-stats-view";
 import "../globals.css";
 
 function SeasonApp() {
@@ -51,6 +62,17 @@ function SeasonApp() {
           case "pitcher-matchup": return <PitcherMatchupView data={data} />;
           case "morning-briefing": return <MorningBriefingView data={data} app={app} navigate={navigate} />;
           case "category-trends": return <CategoryTrendView data={data} />;
+          case "punt-advisor": return <PuntAdvisorView data={data} app={app} navigate={navigate} />;
+          case "playoff-planner": return <PlayoffPlannerView data={data} app={app} navigate={navigate} />;
+          case "optimal-moves": return <OptimalMovesView data={data} app={app} navigate={navigate} />;
+          case "il-stash-advisor": return <ILStashAdvisorView data={data} app={app} navigate={navigate} />;
+          case "trash-talk": return <TrashTalkView data={data} app={app} navigate={navigate} />;
+          case "rival-history": return <RivalHistoryView data={data} app={app} navigate={navigate} />;
+          case "achievements": return <AchievementsView data={data} app={app} navigate={navigate} />;
+          case "weekly-narrative": return <WeeklyNarrativeView data={data} app={app} navigate={navigate} />;
+          case "faab-recommend": return <FaabRecommendView data={data} app={app} navigate={navigate} />;
+          case "ownership-trends": return <OwnershipTrendsView data={data} app={app} navigate={navigate} />;
+          case "roster-stats": return <RosterStatsView data={data} app={app} navigate={navigate} />;
           default: return <div className="p-4 text-muted-foreground">Unknown view: {toolName}</div>;
         }
       }}

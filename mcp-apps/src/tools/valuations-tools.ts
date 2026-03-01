@@ -167,9 +167,9 @@ export function registerValuationsTools(server: McpServer, distDir: string) {
     server,
     "yahoo_projections_update",
     {
-      description: "Force-refresh player projections from FanGraphs. Use before draft to get latest data. proj_type: 'consensus' (default, blends all systems), 'steamer', 'zips', or 'depthcharts'",
+      description: "Force-refresh player projections from FanGraphs. Use before draft to get latest data. proj_type: 'consensus' (default, blends all systems), 'steamer', 'zips', or 'fangraphsdc'",
       inputSchema: {
-        proj_type: z.string().describe("Projection system: consensus, steamer, zips, or depthcharts").default("consensus"),
+        proj_type: z.string().describe("Projection system: consensus, steamer, zips, or fangraphsdc").default("consensus"),
       },
       annotations: { readOnlyHint: false },
       _meta: { ui: { resourceUri: VALUATIONS_URI } },
@@ -257,7 +257,7 @@ export function registerValuationsTools(server: McpServer, distDir: string) {
           var systems = [];
           if (d.steamer_z != null) systems.push("Stm=" + d.steamer_z.toFixed(1));
           if (d.zips_z != null) systems.push("ZiP=" + d.zips_z.toFixed(1));
-          if (d.depthcharts_z != null) systems.push("DC=" + d.depthcharts_z.toFixed(1));
+          if (d.fangraphsdc_z != null) systems.push("DC=" + d.fangraphsdc_z.toFixed(1));
           lines.push("  " + str(d.name).padEnd(22) + " consensus=" + (d.consensus_z || 0).toFixed(1) + "  " + systems.join(" ") + "  [" + (d.level || "?") + "]");
         }
         return {

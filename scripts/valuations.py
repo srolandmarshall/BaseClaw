@@ -46,7 +46,7 @@ def _proj_csv_is_fresh(path):
 def fetch_fangraphs_projections(stats_type, proj_type="steamer"):
     """Fetch projections from FanGraphs JSON API.
     stats_type: 'bat' or 'pit'
-    proj_type: 'steamer', 'zips', or 'depthcharts'
+    proj_type: 'steamer', 'zips', or 'fangraphsdc'
     Returns a pandas DataFrame or None on failure.
     """
     url = (
@@ -117,7 +117,7 @@ def fetch_consensus_projections(stats_type):
     Returns a blended pandas DataFrame or None on failure.
     """
     systems = [
-        ("depthcharts", 0.40),
+        ("fangraphsdc", 0.40),
         ("steamer", 0.30),
         ("zips", 0.30),
     ]
@@ -227,7 +227,7 @@ def fetch_consensus_projections(stats_type):
 
 def ensure_projections(proj_type="consensus", force=False):
     """Ensure projection CSVs exist. Auto-fetch if missing or stale.
-    proj_type: 'consensus' (default), 'steamer', 'zips', or 'depthcharts'
+    proj_type: 'consensus' (default), 'steamer', 'zips', or 'fangraphsdc'
     Returns dict describing what happened for each type.
     """
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -640,7 +640,7 @@ def compute_projection_disagreements(stats_type="bat", count=20):
     """Compare z-scores across projection systems to find disagreements.
     Returns list of players sorted by disagreement level (highest first).
     """
-    systems = ["steamer", "zips", "depthcharts"]
+    systems = ["steamer", "zips", "fangraphsdc"]
     system_zscores = {}
 
     for system in systems:
