@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="banner.png" alt="BaseClaw" width="100%" />
+  <img src="banner.jpg" alt="BaseClaw" width="100%" />
 </p>
 
 # BaseClaw

@@ -16,7 +16,7 @@ config/draft-cheatsheet.json
 __pycache__/
 *.pyc
 *.png
-!banner.png
+!banner.jpg
 !mcp-apps/assets/*.png
 mcp-apps/research_styling_design/
 .agent/
