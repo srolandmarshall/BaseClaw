@@ -78,6 +78,20 @@ def health():
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/endpoints")
+def api_endpoints():
+    """List all registered API endpoints with methods"""
+    endpoints = []
+    for rule in sorted(app.url_map.iter_rules(), key=lambda r: r.rule):
+        if rule.rule.startswith("/api/"):
+            methods = sorted(rule.methods - {"OPTIONS", "HEAD"})
+            endpoints.append({
+                "path": rule.rule,
+                "methods": methods,
+            })
+    return jsonify({"endpoints": endpoints})
+
+
 @app.route("/api/browser-login-status")
 def api_browser_login_status():
     try:

@@ -4,6 +4,170 @@
 
 export PATH="/usr/local/bin:$PATH"
 CONTAINER="fbb-mcp"
+API_BASE="http://localhost:8766"
+
+# --- JSON pretty-printer: jq if available, else python3 ---
+_json_pp() {
+    if command -v jq >/dev/null 2>&1; then
+        jq .
+    else
+        python3 -m json.tool
+    fi
+}
+
+# --- API call helper ---
+# Usage: _api_call <endpoint> [key=val ...] [--method POST] [--data '{"json":"body"}']
+_api_call() {
+    local endpoint="$1"; shift
+    local method="GET"
+    local post_data=""
+    local params=""
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --method)
+                method="$2"; shift 2 ;;
+            --data)
+                post_data="$2"; shift 2 ;;
+            *=*)
+                if [ -z "$params" ]; then
+                    params="?$1"
+                else
+                    params="$params&$1"
+                fi
+                shift ;;
+            *)
+                shift ;;
+        esac
+    done
+
+    local url="${API_BASE}${endpoint}${params}"
+
+    if [ "$method" = "POST" ]; then
+        if [ -n "$post_data" ]; then
+            curl -s -X POST -H "Content-Type: application/json" -d "$post_data" "$url"
+        else
+            curl -s -X POST "$url"
+        fi
+    else
+        curl -s "$url"
+    fi
+}
+
+# --- Command-to-API-endpoint mapping for --json mode ---
+_json_endpoint() {
+    case "$1" in
+        info)               echo "/api/info" ;;
+        standings)          echo "/api/standings" ;;
+        roster)             echo "/api/roster" ;;
+        free-agents|fa)     echo "/api/free-agents" ;;
+        search)             echo "/api/search" ;;
+        matchups)           echo "/api/matchups" ;;
+        scoreboard)         echo "/api/scoreboard" ;;
+        transactions)       echo "/api/transactions" ;;
+        stat-categories)    echo "/api/stat-categories" ;;
+        status)             echo "/api/draft-status" ;;
+        recommend)          echo "/api/draft-recommend" ;;
+        cheatsheet)         echo "/api/draft-cheatsheet" ;;
+        best-available)     echo "/api/best-available" ;;
+        rankings)           echo "/api/rankings" ;;
+        compare)            echo "/api/compare" ;;
+        value)              echo "/api/value" ;;
+        lineup-optimize)    echo "/api/lineup-optimize" ;;
+        category-check)     echo "/api/category-check" ;;
+        injury-report)      echo "/api/injury-report" ;;
+        waiver-analyze)     echo "/api/waiver-analyze" ;;
+        streaming)          echo "/api/streaming" ;;
+        daily-update)       echo "/api/daily-update" ;;
+        *)                  echo "" ;;
+    esac
+}
+
+# --- JSON mode argument builder ---
+# Translates CLI positional args into query params for known commands
+_json_params() {
+    local cmd="$1"; shift
+    case "$cmd" in
+        free-agents|fa)
+            [ -n "$1" ] && echo "pos_type=$1"
+            [ -n "$2" ] && echo "count=$2"
+            ;;
+        search)
+            [ -n "$1" ] && echo "name=$1"
+            ;;
+        matchups|scoreboard|streaming)
+            [ -n "$1" ] && echo "week=$1"
+            ;;
+        transactions)
+            [ -n "$1" ] && echo "type=$1"
+            [ -n "$2" ] && echo "count=$2"
+            ;;
+        best-available)
+            [ -n "$1" ] && echo "pos_type=$1"
+            [ -n "$2" ] && echo "count=$2"
+            ;;
+        rankings)
+            [ -n "$1" ] && echo "pos_type=$1"
+            [ -n "$2" ] && echo "count=$2"
+            ;;
+        compare)
+            [ -n "$1" ] && echo "player1=$1"
+            [ -n "$2" ] && echo "player2=$2"
+            ;;
+        value)
+            [ -n "$1" ] && echo "player_name=$1"
+            ;;
+        waiver-analyze)
+            [ -n "$1" ] && echo "pos_type=$1"
+            [ -n "$2" ] && echo "count=$2"
+            ;;
+        lineup-optimize)
+            [ "$1" = "--apply" ] && echo "apply=true"
+            ;;
+    esac
+}
+
+# --- Handle --json flag ---
+if [ "$1" = "--json" ]; then
+    shift
+    cmd="$1"; shift
+    endpoint=$(_json_endpoint "$cmd")
+    if [ -z "$endpoint" ]; then
+        echo "{\"error\": \"No API mapping for command: $cmd\"}" | _json_pp
+        exit 1
+    fi
+    # Build param array from remaining args
+    param_args=()
+    for p in $(_json_params "$cmd" "$@"); do
+        param_args+=("$p")
+    done
+    _api_call "$endpoint" "${param_args[@]}" | _json_pp
+    exit 0
+fi
+
+# --- Handle api and api-list commands before the case block ---
+if [ "$1" = "api-list" ]; then
+    _api_call "/api/endpoints" | _json_pp
+    exit 0
+fi
+
+if [ "$1" = "api" ]; then
+    shift
+    endpoint="$1"; shift
+    if [ -z "$endpoint" ]; then
+        echo "Usage: yf api <endpoint> [key=val ...] [--method POST] [--data '{...}']"
+        echo ""
+        echo "Examples:"
+        echo "  yf api /api/rankings pos_type=B count=25"
+        echo "  yf api /api/roster"
+        echo "  yf api /api/trade-eval --method POST --data '{\"give_ids\":\"123\",\"get_ids\":\"456\"}'"
+        echo ""
+        echo "Run 'yf api-list' to see all endpoints."
+        exit 0
+    fi
+    _api_call "$endpoint" "$@" | _json_pp
+    exit 0
+fi
 
 case "$1" in
     # Setup / discovery
@@ -128,6 +292,11 @@ case "$1" in
         echo "  mlb stats <id>  - Player stats"
         echo "  mlb schedule    - Today's games"
         echo "  mlb injuries    - Current injuries"
+        echo ""
+        echo "API (JSON output):"
+        echo "  api <endpoint> [k=v ...]     - Call API directly, output JSON"
+        echo "  api-list                      - List all API endpoints"
+        echo "  --json <command> [args]       - Run command via API, output JSON"
         echo ""
         echo "Browser (write operations):"
         echo "  browser-login             - Log into Yahoo for browser writes"
