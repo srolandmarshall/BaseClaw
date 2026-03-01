@@ -8,6 +8,8 @@ yahoo-fantasy.py, season-manager.py, history.py, intel.py, and mlb-data.py.
 import os
 import json
 import time
+import http.client
+import ssl
 import urllib.request
 import threading
 
@@ -41,6 +43,31 @@ def mlb_fetch(endpoint):
     except Exception as e:
         print("Warning: MLB API fetch failed for " + endpoint + ": " + str(e))
         return {}
+
+
+def reddit_get(path):
+    """Fetch JSON from Reddit API. Uses http.client to bypass TLS fingerprint blocking.
+
+    Args:
+        path: URL path including query string (e.g. '/r/fantasybaseball/hot.json?limit=50')
+    Returns:
+        Parsed JSON dict, or None on error.
+    """
+    try:
+        ctx = ssl.create_default_context()
+        conn = http.client.HTTPSConnection("www.reddit.com", timeout=10, context=ctx)
+        conn.request("GET", path, headers={"User-Agent": "BaseClaw:v1.0"})
+        resp = conn.getresponse()
+        if resp.status != 200:
+            print("Warning: Reddit returned HTTP " + str(resp.status) + " for " + path)
+            conn.close()
+            return None
+        data = json.loads(resp.read().decode())
+        conn.close()
+        return data
+    except Exception as e:
+        print("Warning: Reddit fetch failed for " + path + ": " + str(e))
+        return None
 
 
 # ---------------------------------------------------------------------------

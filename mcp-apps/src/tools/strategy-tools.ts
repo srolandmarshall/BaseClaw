@@ -4,8 +4,6 @@ import { z } from "zod";
 import { apiGet, apiPost, toolError } from "../api/python-client.js";
 import {
   str,
-  type PlayerNewsResponse,
-  type NewsFeedResponse,
   type ProbablePitchersResponse,
   type ScheduleAnalysisResponse,
   type CategoryImpactResponse,
@@ -15,73 +13,6 @@ import {
 import { SEASON_URI } from "./season-tools.js";
 
 export function registerStrategyTools(server: McpServer) {
-
-  // fantasy_player_news
-  registerAppTool(
-    server,
-    "fantasy_player_news",
-    {
-      description: "Get recent news for a specific player from RotoWire",
-      inputSchema: { player_name: z.string().describe("Player name to look up") },
-      annotations: { readOnlyHint: true },
-      _meta: { ui: { resourceUri: SEASON_URI } },
-    },
-    async ({ player_name }) => {
-      try {
-        const data = await apiGet<PlayerNewsResponse>("/api/news/player", { name: player_name });
-        const entries = data.news || [];
-        if (entries.length === 0) {
-          return {
-            content: [{ type: "text" as const, text: "No news found for: " + player_name }],
-            structuredContent: { type: "player-news", ai_recommendation: null, ...data },
-          };
-        }
-        const lines = ["News for " + player_name + " (" + entries.length + " items):"];
-        for (const e of entries) {
-          const injury = e.injury_flag ? " [INJURY]" : "";
-          lines.push("  " + str(e.timestamp).slice(0, 10) + " " + str(e.headline) + injury);
-        }
-        return {
-          content: [{ type: "text" as const, text: lines.join("\n") }],
-          structuredContent: { type: "player-news", ai_recommendation: null, ...data },
-        };
-      } catch (e) { return toolError(e); }
-    },
-  );
-
-  // fantasy_news_feed
-  registerAppTool(
-    server,
-    "fantasy_news_feed",
-    {
-      description: "Get recent fantasy baseball news from RotoWire RSS feed",
-      inputSchema: { limit: z.number().describe("Number of news items to return").default(20) },
-      annotations: { readOnlyHint: true },
-      _meta: { ui: { resourceUri: SEASON_URI } },
-    },
-    async ({ limit }) => {
-      try {
-        const data = await apiGet<NewsFeedResponse>("/api/news", { limit: String(limit) });
-        const entries = data.news || [];
-        if (entries.length === 0) {
-          return {
-            content: [{ type: "text" as const, text: "No news available" }],
-            structuredContent: { type: "news-feed", ai_recommendation: null, ...data },
-          };
-        }
-        const lines = ["Fantasy Baseball News (" + entries.length + " items):"];
-        for (const e of entries) {
-          const injury = e.injury_flag ? " [INJURY]" : "";
-          const player = e.player ? str(e.player).padEnd(22) : "";
-          lines.push("  " + str(e.timestamp).slice(0, 10) + " " + player + str(e.headline) + injury);
-        }
-        return {
-          content: [{ type: "text" as const, text: lines.join("\n") }],
-          structuredContent: { type: "news-feed", ai_recommendation: null, ...data },
-        };
-      } catch (e) { return toolError(e); }
-    },
-  );
 
   // fantasy_probable_pitchers
   registerAppTool(

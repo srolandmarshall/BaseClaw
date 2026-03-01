@@ -1,31 +1,34 @@
 #!/usr/bin/env python3
-"""Fantasy Baseball News Feed - RotoWire RSS Integration
+"""Fantasy Baseball News Feed - Multi-Source Aggregator
 
-Parses RotoWire MLB RSS feed for player news, injuries, and updates.
-Supports player name matching to link news to roster players.
+Aggregates fantasy baseball news from 16 sources:
+- RotoWire MLB, ESPN MLB, FanGraphs, CBS Sports MLB, Yahoo MLB, MLB.com
+- Pitcher List, Razzball, Google News MLB, RotoBaller
+- Reddit r/fantasybaseball (JSON API)
+- Pitcher List (Bluesky), Baseball America (Bluesky), Mr. Cheatsheet (Bluesky)
+- Joe Orrico (Bluesky), Fantasy Six Pack (Bluesky)
 
-Data source:
-- RotoWire MLB RSS (https://www.rotowire.com/rss/news.htm?sport=MLB)
+Also supports player name matching to link news to roster players.
 """
 
 import sys
 import os
 import time
+import re
 import json
 import urllib.request
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from shared import USER_AGENT, cache_get, cache_set, normalize_player_name
-
-# RSS URL
-ROTOWIRE_RSS_URL = "https://www.rotowire.com/rss/news.htm?sport=MLB"
+from shared import USER_AGENT, cache_get, cache_set, normalize_player_name, reddit_get
 
 # Cache
 _cache = {}
-TTL_NEWS = 900  # 15 minutes
+TTL_NEWS = 900      # 15 minutes (breaking news sources)
+TTL_ANALYSIS = 1800  # 30 minutes (analysis/editorial sources)
 
 # Injury keywords to detect in titles and descriptions
 INJURY_KEYWORDS = [
@@ -36,6 +39,125 @@ INJURY_KEYWORDS = [
     "setback", "shut down", "shelved", "sidelined",
 ]
 
+# Pre-compiled regexes
+_TZ_ABBR_RE = re.compile(r"\s+[A-Z]{2,5}$")
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+# ============================================================
+# 1. Feed Registry
+# ============================================================
+
+# Feeds disabled via NEWS_FEEDS_DISABLED env var (comma-separated source IDs)
+_disabled_feeds = set(
+    s.strip().lower()
+    for s in os.environ.get("NEWS_FEEDS_DISABLED", "").split(",")
+    if s.strip()
+)
+
+FEED_REGISTRY = {
+    "rotowire": {
+        "url": "https://www.rotowire.com/rss/news.htm?sport=MLB",
+        "name": "RotoWire MLB",
+        "ttl": TTL_NEWS,
+        "enabled": "rotowire" not in _disabled_feeds,
+    },
+    "espn": {
+        "url": "https://www.espn.com/espn/rss/mlb/news",
+        "name": "ESPN MLB",
+        "ttl": TTL_NEWS,
+        "enabled": "espn" not in _disabled_feeds,
+    },
+    "fangraphs": {
+        "url": "https://fantasy.fangraphs.com/feed/",
+        "name": "FanGraphs",
+        "ttl": TTL_ANALYSIS,
+        "enabled": "fangraphs" not in _disabled_feeds,
+    },
+    "cbs": {
+        "url": "https://www.cbssports.com/rss/headlines/mlb/",
+        "name": "CBS Sports MLB",
+        "ttl": TTL_NEWS,
+        "enabled": "cbs" not in _disabled_feeds,
+    },
+    "yahoo": {
+        "url": "https://sports.yahoo.com/mlb/rss.xml",
+        "name": "Yahoo MLB",
+        "ttl": TTL_NEWS,
+        "enabled": "yahoo" not in _disabled_feeds,
+    },
+    "mlb": {
+        "url": "https://www.mlb.com/feeds/news/rss.xml",
+        "name": "MLB.com",
+        "ttl": TTL_NEWS,
+        "enabled": "mlb" not in _disabled_feeds,
+    },
+    "pitcherlist": {
+        "url": "https://pitcherlist.com/feed",
+        "name": "Pitcher List",
+        "ttl": TTL_ANALYSIS,
+        "enabled": "pitcherlist" not in _disabled_feeds,
+    },
+    "razzball": {
+        "url": "https://razzball.com/feed/",
+        "name": "Razzball",
+        "ttl": TTL_ANALYSIS,
+        "enabled": "razzball" not in _disabled_feeds,
+    },
+    "google": {
+        "url": "https://news.google.com/rss/search?q=MLB+baseball&hl=en-US&gl=US&ceid=US:en",
+        "name": "Google News MLB",
+        "ttl": TTL_NEWS,
+        "enabled": "google" not in _disabled_feeds,
+    },
+    "reddit": {
+        "url": "https://www.reddit.com/r/fantasybaseball/hot.json?limit=50",
+        "name": "Reddit r/fantasybaseball",
+        "ttl": TTL_NEWS,
+        "enabled": "reddit" not in _disabled_feeds,
+        "fetcher": "reddit",
+    },
+    "rotoballer": {
+        "url": "https://www.rotoballer.com/feed",
+        "name": "RotoBaller",
+        "ttl": TTL_ANALYSIS,
+        "enabled": "rotoballer" not in _disabled_feeds,
+    },
+    "bsky_pitcherlist": {
+        "url": "https://bsky.app/profile/pitcherlist.com/rss",
+        "name": "Pitcher List (Bluesky)",
+        "ttl": TTL_ANALYSIS,
+        "enabled": "bsky_pitcherlist" not in _disabled_feeds,
+    },
+    "bsky_baseballamerica": {
+        "url": "https://bsky.app/profile/baseballamerica.com/rss",
+        "name": "Baseball America (Bluesky)",
+        "ttl": TTL_ANALYSIS,
+        "enabled": "bsky_baseballamerica" not in _disabled_feeds,
+    },
+    "bsky_mrcheatsheet": {
+        "url": "https://bsky.app/profile/mrcheatsheet.bsky.social/rss",
+        "name": "Mr. Cheatsheet (Bluesky)",
+        "ttl": TTL_ANALYSIS,
+        "enabled": "bsky_mrcheatsheet" not in _disabled_feeds,
+    },
+    "bsky_joeorrico": {
+        "url": "https://bsky.app/profile/joeorrico99.bsky.social/rss",
+        "name": "Joe Orrico (Bluesky)",
+        "ttl": TTL_ANALYSIS,
+        "enabled": "bsky_joeorrico" not in _disabled_feeds,
+    },
+    "bsky_sixpack": {
+        "url": "https://bsky.app/profile/fantasysixpack.net/rss",
+        "name": "Fantasy Six Pack (Bluesky)",
+        "ttl": TTL_ANALYSIS,
+        "enabled": "bsky_sixpack" not in _disabled_feeds,
+    },
+}
+
+
+# ============================================================
+# 2. Cache Helpers
+# ============================================================
 
 def _cache_get(key, ttl_seconds):
     """Get cached value if not expired"""
@@ -46,6 +168,10 @@ def _cache_set(key, data):
     """Store value in cache with current timestamp"""
     cache_set(_cache, key, data)
 
+
+# ============================================================
+# 3. Name Matching
+# ============================================================
 
 def _normalize_name(name):
     """Normalize player name for matching across sources"""
@@ -58,43 +184,36 @@ def _names_match(name_a, name_b):
     norm_b = _normalize_name(name_b)
     if not norm_a or not norm_b:
         return False
-    # Exact match
     if norm_a == norm_b:
         return True
-    # One name contains the other (handles partial matches)
     if norm_a in norm_b or norm_b in norm_a:
         return True
-    # Last name + first initial match
     parts_a = norm_a.split()
     parts_b = norm_b.split()
     if len(parts_a) >= 2 and len(parts_b) >= 2:
-        # Same last name and first initial
         if parts_a[-1] == parts_b[-1] and parts_a[0][0] == parts_b[0][0]:
             return True
     return False
 
 
 # ============================================================
-# 3. RSS Feed Parsing
+# 4. RSS Feed Parsing
 # ============================================================
 
 def _extract_player_name(title):
     """Try to extract player name from RSS title.
 
-    RotoWire titles typically follow the format:
-    "Player Name - Some headline about the player"
-    or "Player Name: headline"
+    Common formats:
+    - "Player Name - Some headline" (RotoWire)
+    - "Player Name: headline" (various)
     """
     if not title:
         return ""
-    # Try dash separator (most common RotoWire format)
     if " - " in title:
         candidate = title.split(" - ", 1)[0].strip()
-        # Validate: player names are typically 2-4 words, no numbers
         words = candidate.split()
         if 1 <= len(words) <= 4 and not any(c.isdigit() for c in candidate):
             return candidate
-    # Try colon separator
     if ": " in title:
         candidate = title.split(": ", 1)[0].strip()
         words = candidate.split()
@@ -116,111 +235,273 @@ def _parse_pub_date(date_str):
     """Parse RSS pubDate string to ISO format timestamp"""
     if not date_str:
         return ""
-    # RFC 822 format: "Mon, 01 Jan 2026 12:00:00 GMT"
+    s = date_str.strip()
+    # Strip timezone abbreviations like EST, PST, CDT that strptime can't parse
+    s = _TZ_ABBR_RE.sub("", s)
     formats = [
-        "%a, %d %b %Y %H:%M:%S %Z",
         "%a, %d %b %Y %H:%M:%S %z",
+        "%a, %d %b %Y %H:%M:%S",
+        "%d %b %Y %H:%M %z",
+        "%d %b %Y %H:%M:%S %z",
+        "%d %b %Y %H:%M",
         "%Y-%m-%dT%H:%M:%S%z",
         "%Y-%m-%dT%H:%M:%SZ",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M:%S",
     ]
     for fmt in formats:
         try:
-            dt = datetime.strptime(date_str.strip(), fmt)
+            dt = datetime.strptime(s, fmt)
             return dt.strftime("%Y-%m-%d %H:%M:%S")
         except ValueError:
             continue
-    # Fallback: return the raw string
     return date_str.strip()
 
 
-def fetch_news():
-    """Fetch and parse RotoWire RSS feed. Returns list of news entries."""
-    cached = _cache_get("rss_feed", TTL_NEWS)
-    if cached is not None:
-        return cached
-
-    try:
-        req = urllib.request.Request(
-            ROTOWIRE_RSS_URL,
-            headers={"User-Agent": USER_AGENT}
-        )
-        with urllib.request.urlopen(req, timeout=15) as response:
-            raw_xml = response.read().decode("utf-8")
-    except Exception as e:
-        print("Error fetching RotoWire RSS: " + str(e))
-        return []
-
+def _parse_rss_items(raw_xml):
+    """Parse RSS/Atom XML into a list of (title, link, description, pub_date) tuples."""
     try:
         root = ET.fromstring(raw_xml)
     except ET.ParseError as e:
         print("Error parsing RSS XML: " + str(e))
         return []
 
-    entries = []
-    # RSS 2.0 structure: rss > channel > item
+    items = []
+
+    # RSS 2.0: rss > channel > item
     channel = root.find("channel")
-    if channel is None:
-        # Try items directly under root
-        items = root.findall(".//item")
-    else:
-        items = channel.findall("item")
+    if channel is not None:
+        for item in channel.findall("item"):
+            items.append((
+                (item.findtext("title") or "").strip(),
+                (item.findtext("link") or "").strip(),
+                (item.findtext("description") or "").strip(),
+                (item.findtext("pubDate") or "").strip(),
+            ))
+        return items
 
-    for item in items:
-        title = (item.findtext("title") or "").strip()
-        link = (item.findtext("link") or "").strip()
-        description = (item.findtext("description") or "").strip()
-        pub_date = (item.findtext("pubDate") or "").strip()
+    # Atom: feed > entry
+    ns = {"atom": "http://www.w3.org/2005/Atom"}
+    for entry in root.findall("atom:entry", ns):
+        link_el = entry.find("atom:link", ns)
+        link = (link_el.get("href", "") if link_el is not None else "").strip()
+        items.append((
+            (entry.findtext("atom:title", "", ns)).strip(),
+            link,
+            (entry.findtext("atom:summary", "", ns) or entry.findtext("atom:content", "", ns) or "").strip(),
+            (entry.findtext("atom:published", "", ns) or entry.findtext("atom:updated", "", ns) or "").strip(),
+        ))
 
+    # Fallback: items anywhere in tree
+    if not items:
+        for item in root.findall(".//item"):
+            items.append((
+                (item.findtext("title") or "").strip(),
+                (item.findtext("link") or "").strip(),
+                (item.findtext("description") or "").strip(),
+                (item.findtext("pubDate") or "").strip(),
+            ))
+
+    return items
+
+
+def _fetch_rss_feed(url, source_name, ttl=TTL_NEWS):
+    """Fetch and parse a single RSS feed. Returns list of news entry dicts."""
+    cache_key = "feed_" + source_name
+    cached = _cache_get(cache_key, ttl)
+    if cached is not None:
+        return cached
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=15) as response:
+            raw_xml = response.read().decode("utf-8")
+    except Exception as e:
+        print("Error fetching " + source_name + " RSS: " + str(e))
+        return []
+
+    raw_items = _parse_rss_items(raw_xml)
+    entries = []
+    for title, link, description, pub_date in raw_items:
         player = _extract_player_name(title)
-        # Build headline: everything after the player name separator
         headline = title
         if player and " - " in title:
             headline = title.split(" - ", 1)[1].strip()
         elif player and ": " in title:
             headline = title.split(": ", 1)[1].strip()
 
-        entry = {
+        # Strip HTML tags from description
+        clean_desc = description
+        if "<" in clean_desc:
+            clean_desc = _HTML_TAG_RE.sub("", clean_desc).strip()
+
+        entries.append({
+            "source": source_name,
             "player": player,
             "headline": headline,
-            "summary": description,
+            "summary": clean_desc[:500] if clean_desc else "",
             "timestamp": _parse_pub_date(pub_date),
             "injury_flag": _detect_injury(title, description),
             "link": link,
             "raw_title": title,
-        }
-        entries.append(entry)
+        })
 
-    _cache_set("rss_feed", entries)
+    _cache_set(cache_key, entries)
     return entries
 
 
 # ============================================================
-# 4. Player News Filtering
+# 4b. Reddit JSON Feed Fetcher
+# ============================================================
+
+def _fetch_reddit_news():
+    """Fetch r/fantasybaseball hot posts and convert to news entry format."""
+    source_name = FEED_REGISTRY["reddit"]["name"]
+    cache_key = "feed_" + source_name
+    ttl = FEED_REGISTRY["reddit"]["ttl"]
+
+    cached = _cache_get(cache_key, ttl)
+    if cached is not None:
+        return cached
+
+    data = reddit_get("/r/fantasybaseball/hot.json?limit=50")
+    if not data:
+        return []
+
+    entries = []
+    for child in data.get("data", {}).get("children", []):
+        post = child.get("data", {})
+        title = post.get("title", "")
+        score = post.get("score", 0)
+        num_comments = post.get("num_comments", 0)
+        created_utc = post.get("created_utc", 0)
+        flair = post.get("link_flair_text", "") or ""
+        post_id = post.get("id", "")
+
+        # Timestamp from unix epoch
+        ts = ""
+        if created_utc:
+            try:
+                ts = datetime.fromtimestamp(created_utc, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                pass
+
+        # Summary includes engagement context
+        summary = ""
+        if flair:
+            summary = "[" + flair + "] "
+        summary = summary + str(score) + " pts, " + str(num_comments) + " comments"
+
+        entries.append({
+            "source": source_name,
+            "player": "",
+            "headline": title,
+            "summary": summary,
+            "timestamp": ts,
+            "injury_flag": _detect_injury(title, ""),
+            "link": "https://www.reddit.com/r/fantasybaseball/comments/" + post_id,
+            "raw_title": title,
+        })
+
+    _cache_set(cache_key, entries)
+    return entries
+
+
+# ============================================================
+# 5. Legacy RotoWire Fetch (backward compat)
+# ============================================================
+
+def fetch_news():
+    """Fetch and parse RotoWire RSS feed. Returns list of news entries."""
+    rw = FEED_REGISTRY["rotowire"]
+    return _fetch_rss_feed(rw["url"], rw["name"], rw["ttl"])
+
+
+# ============================================================
+# 6. Aggregated Multi-Source Fetch
+# ============================================================
+
+def _headline_key(headline):
+    """Normalize headline for deduplication."""
+    return headline.lower()[:80].strip() if headline else ""
+
+
+def fetch_aggregated_news(sources=None, player=None, limit=50):
+    """Fetch news from all enabled feeds (or a specific subset), merge and deduplicate.
+
+    Args:
+        sources: comma-separated source IDs or list. None = all enabled.
+        player: optional player name to filter results.
+        limit: max entries to return.
+    Returns:
+        list of news entry dicts sorted by timestamp descending.
+    """
+    if isinstance(sources, str):
+        source_ids = [s.strip().lower() for s in sources.split(",") if s.strip()]
+    elif isinstance(sources, list):
+        source_ids = [s.strip().lower() for s in sources if s.strip()]
+    else:
+        source_ids = None
+
+    feeds_to_fetch = [
+        (fid, finfo) for fid, finfo in FEED_REGISTRY.items()
+        if finfo.get("enabled") and (not source_ids or fid in source_ids)
+    ]
+
+    def _fetch_one(fid, finfo):
+        if finfo.get("fetcher") == "reddit":
+            return _fetch_reddit_news()
+        return _fetch_rss_feed(finfo["url"], finfo["name"], finfo.get("ttl", TTL_NEWS))
+
+    all_entries = []
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_fetch_one, fid, finfo): fid for fid, finfo in feeds_to_fetch}
+        for fut in as_completed(futures):
+            try:
+                all_entries.extend(fut.result())
+            except Exception as e:
+                print("Feed fetch error (" + futures[fut] + "): " + str(e))
+
+    # Deduplicate by headline similarity
+    seen = set()
+    unique = []
+    for entry in all_entries:
+        key = _headline_key(entry.get("headline", "") or entry.get("raw_title", ""))
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        unique.append(entry)
+
+    # Sort by timestamp descending (most recent first)
+    unique.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+
+    # Filter by player if specified
+    if player:
+        unique = [
+            e for e in unique
+            if _names_match(player, e.get("player", ""))
+            or player.lower() in (e.get("headline", "") + " " + e.get("summary", "")).lower()
+        ]
+
+    return unique[:limit]
+
+
+# ============================================================
+# 7. Player News Filtering (multi-source)
 # ============================================================
 
 def get_player_news(player_name, limit=5):
-    """Get news for a specific player by name matching."""
-    all_news = fetch_news()
-    if not all_news:
-        return []
-
-    matches = []
-    for entry in all_news:
-        entry_player = entry.get("player", "")
-        if not entry_player:
-            continue
-        if _names_match(player_name, entry_player):
-            matches.append(entry)
-
-    return matches[:limit]
+    """Get news for a specific player by name matching across all sources."""
+    return fetch_aggregated_news(player=player_name, limit=limit)
 
 
 # ============================================================
-# 5. CLI Commands
+# 8. CLI Commands
 # ============================================================
 
 def cmd_news(args, as_json=False):
-    """Show recent fantasy baseball news"""
+    """Show recent fantasy baseball news (RotoWire)"""
     limit = 20
     if args:
         try:
@@ -262,7 +543,6 @@ def cmd_news(args, as_json=False):
 
         summary = entry.get("summary", "")
         if summary:
-            # Truncate long summaries for terminal display
             if len(summary) > 200:
                 summary = summary[:197] + "..."
             print("  " + summary)
@@ -292,13 +572,15 @@ def cmd_news_player(args, as_json=False):
     print("News for: " + player_name)
     print("=" * 70)
     for entry in matches:
+        source = entry.get("source", "")
         headline = entry.get("headline", "")
         timestamp = entry.get("timestamp", "")
         injury = entry.get("injury_flag", False)
 
+        source_tag = " [" + source + "]" if source else ""
         injury_tag = " [INJURY]" if injury else ""
         print("")
-        print("  " + headline + injury_tag)
+        print("  " + headline + source_tag + injury_tag)
         if timestamp:
             print("  " + timestamp)
         summary = entry.get("summary", "")
@@ -308,18 +590,113 @@ def cmd_news_player(args, as_json=False):
             print("  " + summary)
 
 
+def cmd_news_feed(args, as_json=False):
+    """Show aggregated news from all sources"""
+    sources = None
+    player = None
+    limit = 30
+
+    # Parse args: [sources] [limit] or --source=X --player=Y --limit=N
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg.startswith("--source="):
+            sources = arg.split("=", 1)[1]
+        elif arg.startswith("--player="):
+            player = arg.split("=", 1)[1]
+        elif arg.startswith("--limit="):
+            try:
+                limit = int(arg.split("=", 1)[1])
+            except ValueError:
+                pass
+        else:
+            try:
+                limit = int(arg)
+            except ValueError:
+                sources = arg
+        i += 1
+
+    entries = fetch_aggregated_news(sources=sources, player=player, limit=limit)
+
+    if as_json:
+        source_set = sorted(set(e.get("source", "") for e in entries if e.get("source")))
+        return {"entries": entries, "sources": source_set, "count": len(entries)}
+
+    if not entries:
+        print("No news found")
+        return
+
+    print("Fantasy Baseball News Feed")
+    print("=" * 70)
+    for entry in entries:
+        source = entry.get("source", "")
+        player_name = entry.get("player", "")
+        headline = entry.get("headline", "")
+        timestamp = entry.get("timestamp", "")
+        injury = entry.get("injury_flag", False)
+
+        source_tag = "[" + source + "] " if source else ""
+        injury_tag = " [INJURY]" if injury else ""
+        print("")
+        if player_name:
+            print("  " + source_tag + player_name + injury_tag)
+            print("  " + headline)
+        else:
+            print("  " + source_tag + headline + injury_tag)
+        if timestamp:
+            print("  " + timestamp)
+
+
+def cmd_news_sources(args, as_json=False):
+    """List available news sources and their status"""
+    sources = []
+    for fid, finfo in FEED_REGISTRY.items():
+        cache_key = "feed_" + finfo["name"]
+        cached_entry = _cache.get(cache_key)
+        last_fetch = None
+        item_count = 0
+        if cached_entry:
+            data, fetch_time = cached_entry
+            last_fetch = datetime.fromtimestamp(fetch_time).strftime("%Y-%m-%d %H:%M:%S")
+            item_count = len(data) if isinstance(data, list) else 0
+
+        sources.append({
+            "id": fid,
+            "name": finfo["name"],
+            "url": finfo["url"],
+            "ttl": finfo["ttl"],
+            "enabled": finfo.get("enabled", True),
+            "last_fetch": last_fetch,
+            "item_count": item_count,
+        })
+
+    if as_json:
+        return {"sources": sources}
+
+    print("News Sources")
+    print("=" * 70)
+    for s in sources:
+        status = "enabled" if s["enabled"] else "DISABLED"
+        cached = ""
+        if s.get("last_fetch"):
+            cached = " (cached: " + str(s["item_count"]) + " items, " + s["last_fetch"] + ")"
+        print("  " + s["id"].ljust(22) + s["name"].ljust(28) + status + cached)
+
+
 # ============================================================
-# 6. Command Dispatch
+# 9. Command Dispatch
 # ============================================================
 
 COMMANDS = {
     "news": cmd_news,
     "news-player": cmd_news_player,
+    "news-feed": cmd_news_feed,
+    "news-sources": cmd_news_sources,
 }
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Fantasy Baseball News Feed - RotoWire RSS")
+        print("Fantasy Baseball News Feed - Multi-Source RSS Aggregator")
         print("Usage: news.py <command> [args]")
         print("")
         print("Commands:")

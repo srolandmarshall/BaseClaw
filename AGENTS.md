@@ -116,6 +116,7 @@ Never execute writes. Report recommendations only.
 
 - Use workflow tools (`yahoo_morning_briefing`, `yahoo_league_landscape`, `yahoo_waiver_recommendations`, `yahoo_roster_health_check`) — they aggregate 5-7+ individual tool calls each
 - Don't call individual tools when a workflow tool covers the same data
+- Use `fantasy_news_feed` for real-time news across 16 sources. Filter by source when you need specific analysis (e.g., `sources=fangraphs,pitcherlist,bsky_pitcherlist` for pitching analysis, `sources=rotowire` for player-specific injury news, `sources=reddit` for community buzz)
 - Keep reports concise — actions taken and results, not raw data dumps
 
 ## Reporting Format

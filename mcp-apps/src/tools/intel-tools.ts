@@ -15,6 +15,8 @@ import {
   type ProspectWatchResponse,
   type IntelTransactionsResponse,
   type StatcastCompareResponse,
+  type AggregatedNewsFeedResponse,
+  type NewsSourcesResponse,
 } from "../api/types.js";
 
 const INTEL_URI = "ui://baseclaw/intel.html";
@@ -314,6 +316,76 @@ export function registerIntelTools(server: McpServer, distDir: string) {
         return {
           content: [{ type: "text" as const, text: lines.join("\n") }],
           structuredContent: { type: "intel-statcast-history", ai_recommendation, ...data },
+        };
+      } catch (e) { return toolError(e); }
+    },
+  );
+
+  // fantasy_news_feed
+  registerAppTool(
+    server,
+    "fantasy_news_feed",
+    {
+      description: "Real-time fantasy baseball news from 16 sources: ESPN, FanGraphs, CBS, Yahoo, MLB.com, RotoWire, Pitcher List, Razzball, Google News, RotoBaller, Reddit r/fantasybaseball, and 5 Bluesky analyst feeds. Filter by source or search by player.",
+      inputSchema: {
+        sources: z.string().optional().describe("Comma-separated source IDs to filter (e.g. 'espn,fangraphs,rotowire,reddit,bsky_pitcherlist'). Omit for all sources."),
+        player: z.string().optional().describe("Player name to filter news for"),
+        limit: z.number().optional().describe("Max entries to return (default 30)"),
+      },
+      annotations: { readOnlyHint: true },
+      _meta: { ui: { resourceUri: INTEL_URI } },
+    },
+    async ({ sources, player, limit }) => {
+      try {
+        const params: Record<string, string> = {};
+        if (sources) params.sources = sources;
+        if (player) params.player = player;
+        if (limit) params.limit = String(limit);
+        const data = await apiGet<AggregatedNewsFeedResponse>("/api/news/feed", params);
+        const lines = ["Fantasy Baseball News (" + (data.count || 0) + " items from " + (data.sources || []).join(", ") + "):"];
+        for (const e of (data.entries || [])) {
+          const src = e.source ? "[" + e.source + "] " : "";
+          const inj = e.injury_flag ? " [INJURY]" : "";
+          const ts = e.timestamp ? " (" + e.timestamp + ")" : "";
+          if (e.player) {
+            lines.push("  " + src + e.player + ": " + str(e.headline) + inj + ts);
+          } else {
+            lines.push("  " + src + str(e.headline) + inj + ts);
+          }
+        }
+        if ((data.entries || []).length === 0) lines.push("  No news found.");
+        return {
+          content: [{ type: "text" as const, text: lines.join("\n") }],
+          structuredContent: { type: "news-feed", ...data },
+        };
+      } catch (e) { return toolError(e); }
+    },
+  );
+
+  // fantasy_news_sources
+  registerAppTool(
+    server,
+    "fantasy_news_sources",
+    {
+      description: "List available news sources and their status (enabled/disabled, last fetch time, item count)",
+      annotations: { readOnlyHint: true },
+      _meta: { ui: { resourceUri: INTEL_URI } },
+    },
+    async () => {
+      try {
+        const data = await apiGet<NewsSourcesResponse>("/api/news/sources");
+        const lines = ["News Sources:"];
+        lines.push("  " + "ID".padEnd(22) + "Name".padEnd(28) + "Status".padEnd(10) + "Items".padEnd(8) + "TTL");
+        lines.push("  " + "-".repeat(74));
+        for (const s of (data.sources || [])) {
+          const status = s.enabled ? "on" : "OFF";
+          const items = s.item_count > 0 ? String(s.item_count) : "-";
+          const ttl = String(Math.round(s.ttl / 60)) + "m";
+          lines.push("  " + str(s.id).padEnd(22) + str(s.name).padEnd(28) + status.padEnd(10) + items.padEnd(8) + ttl);
+        }
+        return {
+          content: [{ type: "text" as const, text: lines.join("\n") }],
+          structuredContent: { type: "news-sources", ...data },
         };
       } catch (e) { return toolError(e); }
     },

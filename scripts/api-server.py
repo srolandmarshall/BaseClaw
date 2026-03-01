@@ -1691,6 +1691,28 @@ def api_news_player():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/news/feed")
+def api_news_feed():
+    try:
+        sources = request.args.get("sources", None)
+        player = request.args.get("player", None)
+        limit = int(request.args.get("limit", "30"))
+        entries = news.fetch_aggregated_news(sources=sources, player=player, limit=limit)
+        source_set = sorted(set(e.get("source", "") for e in entries if e.get("source")))
+        return jsonify({"entries": entries, "sources": source_set, "count": len(entries)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/news/sources")
+def api_news_sources():
+    try:
+        result = news.cmd_news_sources([], as_json=True)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # --- Strategy / Advanced Analysis ---
 
 

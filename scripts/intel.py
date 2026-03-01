@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mlb_id_cache import get_mlb_id
 import sqlite3
-from shared import MLB_API, mlb_fetch as _mlb_fetch, USER_AGENT, DATA_DIR
+from shared import MLB_API, mlb_fetch as _mlb_fetch, USER_AGENT, DATA_DIR, reddit_get
 from shared import normalize_player_name as _normalize_name
 
 # Current year for all API calls
@@ -638,27 +638,22 @@ def _fetch_reddit_hot():
     cached = _cache_get(cache_key, TTL_REDDIT)
     if cached is not None:
         return cached
-    try:
-        url = "https://www.reddit.com/r/fantasybaseball/hot.json?limit=50"
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            data = json.loads(response.read().decode())
-        posts = []
-        for child in data.get("data", {}).get("children", []):
-            post = child.get("data", {})
-            posts.append({
-                "title": post.get("title", ""),
-                "score": post.get("score", 0),
-                "num_comments": post.get("num_comments", 0),
-                "url": post.get("url", ""),
-                "created_utc": post.get("created_utc", 0),
-                "flair": post.get("link_flair_text", ""),
-            })
-        _cache_set(cache_key, posts)
-        return posts
-    except Exception as e:
-        print("Warning: Reddit fetch failed: " + str(e))
+    data = reddit_get("/r/fantasybaseball/hot.json?limit=50")
+    if not data:
         return []
+    posts = []
+    for child in data.get("data", {}).get("children", []):
+        post = child.get("data", {})
+        posts.append({
+            "title": post.get("title", ""),
+            "score": post.get("score", 0),
+            "num_comments": post.get("num_comments", 0),
+            "url": post.get("url", ""),
+            "created_utc": post.get("created_utc", 0),
+            "flair": post.get("link_flair_text", ""),
+        })
+    _cache_set(cache_key, posts)
+    return posts
 
 
 def _search_reddit_player(player_name):
@@ -669,14 +664,12 @@ def _search_reddit_player(player_name):
         return cached
     try:
         query = urllib.parse.quote(player_name)
-        url = (
-            "https://www.reddit.com/r/fantasybaseball/search.json"
-            "?q=" + query
-            + "&sort=new&restrict_sr=on&limit=10"
-        )
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            data = json.loads(response.read().decode())
+        path = ("/r/fantasybaseball/search.json"
+                "?q=" + query
+                + "&sort=new&restrict_sr=on&limit=10")
+        data = reddit_get(path)
+        if not data:
+            return []
         posts = []
         for child in data.get("data", {}).get("children", []):
             post = child.get("data", {})

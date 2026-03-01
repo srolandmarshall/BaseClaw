@@ -398,7 +398,7 @@ Customize `AGENTS.md` to adjust strategy, risk tolerance, or reporting style.
 </details>
 
 <details>
-<summary><strong>Intelligence</strong> (8 tools)</summary>
+<summary><strong>Intelligence</strong> (10 tools)</summary>
 
 | Tool | Description |
 |------|-------------|
@@ -410,16 +410,16 @@ Customize `AGENTS.md` to adjust strategy, risk tolerance, or reporting style.
 | `fantasy_prospect_watch` | Recent MLB prospect call-ups and roster moves |
 | `fantasy_transactions` | Recent fantasy-relevant MLB transactions (IL, call-up, DFA, trade) |
 | `yahoo_statcast_history` | Compare a player's Statcast profile now vs. 30/60 days ago |
+| `fantasy_news_feed` | Real-time news from 16 sources (ESPN, FanGraphs, CBS, Yahoo, MLB.com, RotoWire, Pitcher List, Razzball, Google News, RotoBaller, Reddit, 5 Bluesky analyst feeds) — filter by source or player |
+| `fantasy_news_sources` | List available news sources and their status |
 
 </details>
 
 <details>
-<summary><strong>Analytics & Strategy</strong> (7 tools)</summary>
+<summary><strong>Analytics & Strategy</strong> (5 tools)</summary>
 
 | Tool | Description |
 |------|-------------|
-| `fantasy_player_news` | Latest news and updates for a specific player |
-| `fantasy_news_feed` | Fantasy-relevant news feed across all players |
 | `fantasy_probable_pitchers` | Probable pitchers for upcoming games |
 | `fantasy_schedule_analysis` | Schedule-based analysis for streaming and lineup planning |
 | `fantasy_category_impact` | Projected category rank impact of a roster move |

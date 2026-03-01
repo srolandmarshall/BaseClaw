@@ -1240,11 +1240,33 @@ export interface NewsEntry {
   injury_flag: boolean;
   impact?: string;
   source?: string;
+  link?: string;
+  raw_title?: string;
 }
 
 export interface NewsFeedResponse {
   news: NewsEntry[];
   count: number;
+}
+
+export interface AggregatedNewsFeedResponse {
+  entries: NewsEntry[];
+  sources: string[];
+  count: number;
+}
+
+export interface NewsSource {
+  id: string;
+  name: string;
+  url: string;
+  ttl: number;
+  enabled: boolean;
+  last_fetch?: string | null;
+  item_count: number;
+}
+
+export interface NewsSourcesResponse {
+  sources: NewsSource[];
 }
 
 export interface PlayerNewsResponse {
