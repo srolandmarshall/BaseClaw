@@ -69,6 +69,10 @@ async function main() {
     app.use(express.json());
 
     // Health check (unauthenticated)
+    app.get("/", (_req, res) => {
+      res.status(200).json({ ok: true, service: "baseclaw", health: "/health", mcp: "/mcp" });
+    });
+
     app.get("/health", (_req, res) => {
       res.json({ ok: true, writes_enabled: process.env.ENABLE_WRITE_OPS === "true" });
     });

@@ -17,6 +17,7 @@ import json
 import time
 import csv
 import io
+import threading
 import urllib.request
 import urllib.parse
 from datetime import date, datetime, timedelta
@@ -107,30 +108,34 @@ def _cache_set(key, data):
 # 1b. Arsenal Snapshot Database
 # ============================================================
 
-_intel_db = None
+_intel_db_local = threading.local()
+_intel_db_lock = threading.Lock()
 
 
 def _get_intel_db():
-    """Get SQLite connection for intel snapshots (reuses season.db)"""
-    global _intel_db
-    if _intel_db is not None:
-        return _intel_db
+    """Get thread-local SQLite connection for intel snapshots."""
+    db = getattr(_intel_db_local, "conn", None)
+    if db is not None:
+        return db
     db_path = os.path.join(DATA_DIR, "season.db")
-    _intel_db = sqlite3.connect(db_path)
-    _intel_db.execute(
-        "CREATE TABLE IF NOT EXISTS arsenal_snapshots "
-        "(player_name TEXT, date TEXT, pitch_type TEXT, "
-        "usage_pct REAL, velocity REAL, spin_rate REAL, "
-        "whiff_rate REAL, "
-        "PRIMARY KEY (player_name, date, pitch_type))"
-    )
-    _intel_db.execute(
-        "CREATE TABLE IF NOT EXISTS statcast_snapshots "
-        "(player_name TEXT, date TEXT, metric TEXT, value REAL, "
-        "PRIMARY KEY (player_name, date, metric))"
-    )
-    _intel_db.commit()
-    return _intel_db
+    db = sqlite3.connect(db_path, timeout=30)
+    # Each worker thread gets its own connection; guard schema setup writes.
+    with _intel_db_lock:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS arsenal_snapshots "
+            "(player_name TEXT, date TEXT, pitch_type TEXT, "
+            "usage_pct REAL, velocity REAL, spin_rate REAL, "
+            "whiff_rate REAL, "
+            "PRIMARY KEY (player_name, date, pitch_type))"
+        )
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS statcast_snapshots "
+            "(player_name TEXT, date TEXT, metric TEXT, value REAL, "
+            "PRIMARY KEY (player_name, date, metric))"
+        )
+        db.commit()
+    _intel_db_local.conn = db
+    return db
 
 
 def _save_statcast_snapshot(name, statcast_data):
@@ -777,7 +782,14 @@ def _fetch_fangraphs_regression_batting():
     try:
         from pybaseball import batting_stats
         year = YEAR
-        df = batting_stats(year, qual=25)
+        try:
+            df = batting_stats(year, qual=25)
+        except Exception:
+            if date.today().month < 5:
+                year = YEAR - 1
+                df = batting_stats(year, qual=25)
+            else:
+                raise
         if (df is None or len(df) == 0) and date.today().month < 5:
             year = YEAR - 1
             df = batting_stats(year, qual=25)
@@ -797,6 +809,7 @@ def _fetch_fangraphs_regression_batting():
         return result
     except Exception as e:
         print("Warning: FanGraphs regression batting fetch failed: " + str(e))
+        _cache_set(cache_key, {})
         return {}
 
 
@@ -811,7 +824,14 @@ def _fetch_fangraphs_regression_pitching():
     try:
         from pybaseball import pitching_stats
         year = YEAR
-        df = pitching_stats(year, qual=25)
+        try:
+            df = pitching_stats(year, qual=25)
+        except Exception:
+            if date.today().month < 5:
+                year = YEAR - 1
+                df = pitching_stats(year, qual=25)
+            else:
+                raise
         if (df is None or len(df) == 0) and date.today().month < 5:
             year = YEAR - 1
             df = pitching_stats(year, qual=25)
@@ -834,6 +854,7 @@ def _fetch_fangraphs_regression_pitching():
         return result
     except Exception as e:
         print("Warning: FanGraphs regression pitching fetch failed: " + str(e))
+        _cache_set(cache_key, {})
         return {}
 
 
