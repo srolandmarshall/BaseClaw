@@ -9,11 +9,10 @@ import json
 import time
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from yahoo_oauth import OAuth2
 import yahoo_fantasy_api as yfa
 from valuations import load_all, get_player_by_name
 from mlb_id_cache import get_mlb_id
-from shared import enrich_with_intel, get_team_key, OAUTH_FILE, LEAGUE_ID
+from shared import enrich_with_intel, get_team_key, get_connection, LEAGUE_ID
 
 TEAM_ID = os.environ.get("TEAM_ID", "")
 _BEST_AVAILABLE_CACHE = {}
@@ -41,7 +40,7 @@ def _best_available_cache_set(key, value):
 
 class DraftAssistant:
     def __init__(self):
-        self.sc = OAuth2(None, None, from_file=OAUTH_FILE)
+        self.sc = get_connection()
         self.gm = yfa.Game(self.sc, "mlb")
         self.lg = self.gm.to_league(LEAGUE_ID)
         self.team_key = get_team_key(self.lg) or TEAM_ID

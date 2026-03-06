@@ -11,6 +11,7 @@ import time
 import http.client
 import ssl
 import urllib.request
+import urllib.error
 import threading
 
 from yahoo_oauth import OAuth2
@@ -24,6 +25,9 @@ LEAGUE_ID = os.environ.get("LEAGUE_ID", "")
 TEAM_ID = os.environ.get("TEAM_ID", "")
 GAME_KEY = LEAGUE_ID.split(".")[0] if LEAGUE_ID else ""
 DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
+YAHOO_OAUTH_BRIDGE_URL = os.environ.get("YAHOO_OAUTH_BRIDGE_URL", "").strip()
+YAHOO_OAUTH_BRIDGE_TOKEN = os.environ.get("YAHOO_OAUTH_BRIDGE_TOKEN", "").strip()
+YAHOO_OAUTH_BRIDGE_TIMEOUT = int(os.environ.get("YAHOO_OAUTH_BRIDGE_TIMEOUT_SECONDS", "10"))
 
 # ---------------------------------------------------------------------------
 # MLB Stats API
@@ -31,6 +35,111 @@ DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
 MLB_API = "https://statsapi.mlb.com/api/v1"
 
 USER_AGENT = "YahooFantasyBot/1.0"
+
+
+def _read_oauth_file():
+    try:
+        with open(OAUTH_FILE, "r") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_oauth_file(payload):
+    try:
+        os.makedirs(os.path.dirname(OAUTH_FILE), exist_ok=True)
+        with open(OAUTH_FILE, "w") as f:
+            json.dump(payload, f, indent=2)
+    except Exception as e:
+        print("Warning: could not write oauth file: " + str(e))
+
+
+def _oauth_has_tokens(payload):
+    return bool(payload.get("access_token")) and bool(payload.get("refresh_token"))
+
+
+def _oauth_bridge_headers():
+    if not YAHOO_OAUTH_BRIDGE_TOKEN:
+        return None
+    return {
+        "Authorization": "Bearer " + YAHOO_OAUTH_BRIDGE_TOKEN,
+        "Content-Type": "application/json",
+        "User-Agent": USER_AGENT,
+    }
+
+
+def _fetch_oauth_from_bridge():
+    if not YAHOO_OAUTH_BRIDGE_URL:
+        return False
+    headers = _oauth_bridge_headers()
+    if not headers:
+        return False
+    try:
+        req = urllib.request.Request(
+            YAHOO_OAUTH_BRIDGE_URL,
+            headers={"Authorization": headers["Authorization"], "User-Agent": headers["User-Agent"]},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=YAHOO_OAUTH_BRIDGE_TIMEOUT) as response:
+            raw = response.read().decode()
+        data = json.loads(raw) if raw else {}
+        oauth = data.get("oauth") if isinstance(data, dict) else None
+        if not isinstance(oauth, dict):
+            return False
+        merged = _read_oauth_file()
+        merged.update(oauth)
+        _write_oauth_file(merged)
+        return _oauth_has_tokens(merged)
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            print("Warning: oauth bridge GET failed: HTTP " + str(e.code))
+        return False
+    except Exception as e:
+        print("Warning: oauth bridge GET failed: " + str(e))
+        return False
+
+
+def _push_oauth_to_bridge(force=False):
+    global _oauth_bridge_last_push
+    if not YAHOO_OAUTH_BRIDGE_URL:
+        return False
+    headers = _oauth_bridge_headers()
+    if not headers:
+        return False
+    now = time.time()
+    if not force and now - _oauth_bridge_last_push < 60:
+        return False
+    oauth = _read_oauth_file()
+    if not _oauth_has_tokens(oauth):
+        return False
+    try:
+        body = json.dumps({"oauth": oauth}).encode()
+        req = urllib.request.Request(
+            YAHOO_OAUTH_BRIDGE_URL,
+            data=body,
+            headers=headers,
+            method="PUT",
+        )
+        with urllib.request.urlopen(req, timeout=YAHOO_OAUTH_BRIDGE_TIMEOUT):
+            pass
+        _oauth_bridge_last_push = now
+        return True
+    except Exception as e:
+        print("Warning: oauth bridge PUT failed: " + str(e))
+        return False
+
+
+def _ensure_oauth_ready():
+    payload = _read_oauth_file()
+    if _oauth_has_tokens(payload):
+        return
+    if _fetch_oauth_from_bridge():
+        return
+    raise RuntimeError(
+        "Yahoo OAuth tokens are missing. Configure YAHOO_OAUTH_BRIDGE_URL/YAHOO_OAUTH_BRIDGE_TOKEN "
+        "or upload a tokenized yahoo_oauth.json."
+    )
 
 
 def mlb_fetch(endpoint):
@@ -118,6 +227,7 @@ def get_connection():
         if cached and now - _yahoo_cache.get("connection_time", 0) < _YAHOO_CACHE_TTL_SECONDS:
             sc = cached
         else:
+            _ensure_oauth_ready()
             sc = OAuth2(None, None, from_file=OAUTH_FILE)
             _yahoo_cache["connection"] = sc
             _yahoo_cache["connection_time"] = now
@@ -129,6 +239,9 @@ def get_connection():
 
     if not sc.token_is_valid():
         sc.refresh_access_token()
+        _push_oauth_to_bridge(force=True)
+    else:
+        _push_oauth_to_bridge(force=False)
     return sc
 
 
@@ -179,6 +292,7 @@ def get_league_context():
 
 _YAHOO_CACHE_TTL_SECONDS = int(os.environ.get("YAHOO_CONTEXT_CACHE_TTL_SECONDS", "30"))
 _yahoo_cache_lock = threading.Lock()
+_oauth_bridge_last_push = 0
 _yahoo_cache = {
     "connection": None,
     "connection_time": 0,
