@@ -1740,18 +1740,37 @@ def _build_batted_ball_profile(name):
     if cached is not None:
         return cached
 
+    year = YEAR
     try:
         from pybaseball import pitching_stats
         df_cache_key = ("batted_ball_df", YEAR)
-        df = _cache_get(df_cache_key, TTL_FANGRAPHS)
+        fetch_error = None
+        df_payload = _cache_get(df_cache_key, TTL_FANGRAPHS)
+        if isinstance(df_payload, dict):
+            df = df_payload.get("df")
+            cached_year = df_payload.get("year")
+            if cached_year is not None:
+                year = cached_year
+            fetch_error = df_payload.get("error")
+        else:
+            df = df_payload
         if df is None:
-            year = YEAR
-            df = pitching_stats(year, qual=25)
-            if (df is None or len(df) == 0) and date.today().month < 5:
-                year = YEAR - 1
+            try:
                 df = pitching_stats(year, qual=25)
+            except Exception as e:
+                if date.today().month < 5:
+                    year = YEAR - 1
+                    df = pitching_stats(year, qual=25)
+                else:
+                    raise e
             if df is not None and len(df) > 0:
-                _cache_set(df_cache_key, df)
+                _cache_set(df_cache_key, {"df": df, "year": year})
+            else:
+                _cache_set(df_cache_key, {"df": None, "year": year})
+        if fetch_error:
+            result = {"note": "FanGraphs pitching data unavailable", "source_error": fetch_error}
+            _cache_manager.set(cache_key, result, ttl=TTL_FANGRAPHS)
+            return result
         if df is None or len(df) == 0:
             result = {"note": "No FanGraphs pitching data available"}
             _cache_manager.set(cache_key, result, ttl=TTL_FANGRAPHS)
@@ -1823,9 +1842,12 @@ def _build_batted_ball_profile(name):
         _cache_manager.set(cache_key, result, ttl=TTL_FANGRAPHS)
         return result
     except Exception as e:
-        print("Warning: _build_batted_ball_profile failed for " + str(name) + ": " + str(e))
-        result = {"error": str(e)}
-        _cache_manager.set(cache_key, result, ttl=300)
+        err = str(e)
+        print("Warning: _build_batted_ball_profile FanGraphs fetch failed: " + err)
+        # Negative-cache the shared DataFrame fetch error so we don't log once per player.
+        _cache_set(("batted_ball_df", YEAR), {"df": None, "year": year, "error": err})
+        result = {"note": "FanGraphs pitching data unavailable", "source_error": err}
+        _cache_manager.set(cache_key, result, ttl=TTL_FANGRAPHS)
         return result
 
 

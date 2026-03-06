@@ -420,19 +420,21 @@ def get_trend_lookup():
 # ---------------------------------------------------------------------------
 # Player enrichment helpers
 # ---------------------------------------------------------------------------
-def enrich_with_intel(players, count=None, boost_scores=False):
+def enrich_with_intel(players, count=None, boost_scores=False, include=None):
     """Add intel data to a list of player dicts.
 
     Args:
         players: list of player dicts (must have "name" key)
         count: if set, only enrich the first N players
         boost_scores: if True, adjust player "score" key based on quality tier
+        include: optional intel sections list (defaults to ["statcast", "trends"])
     """
     from intel import batch_intel
     try:
         subset = players[:count] if count else players
         names = [p.get("name", "") for p in subset]
-        intel_data = batch_intel(names, include=["statcast", "trends"])
+        include_sections = include or ["statcast", "trends"]
+        intel_data = batch_intel(names, include=include_sections)
         for p in subset:
             pi = intel_data.get(p.get("name", ""))
             p["intel"] = pi

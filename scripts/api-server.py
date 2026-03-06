@@ -368,7 +368,8 @@ def api_best_available():
     try:
         pos_type = request.args.get("pos_type", "B")
         count = request.args.get("count", "25")
-        result = draft_assistant.cmd_best_available([pos_type, count], as_json=True)
+        include_intel = request.args.get("include_intel", "true")
+        result = draft_assistant.cmd_best_available([pos_type, count, include_intel], as_json=True)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
