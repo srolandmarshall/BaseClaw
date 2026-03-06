@@ -1,0 +1,33 @@
+# fly.toml app configuration file generated for baseclaw-mcp on 2026-03-05T21:31:47-05:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'baseclaw-mcp'
+primary_region = 'iad'
+
+[env]
+  ENABLE_PREVIEW = 'false'
+  ENABLE_WRITE_OPS = 'true'
+  MCP_SERVER_URL = 'https://baseclaw-mcp.fly.dev'
+  PORT = '4951'
+
+[http_service]
+  internal_port = 4951
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+  [[http_service.checks]]
+    interval = '20s'
+    timeout = '8s'
+    grace_period = '45s'
+    method = 'GET'
+    path = '/health'
+
+[[vm]]
+  memory = '2048'
+  cpu_kind = 'shared'
+  cpus = 1

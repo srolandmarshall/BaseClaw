@@ -6,11 +6,12 @@ import json
 import os
 import datetime
 import yahoo_fantasy_api as yfa
+from yahoo_oauth import OAuth2
 from mlb_id_cache import get_mlb_id
 from shared import (
     get_connection, get_league, get_league_context, get_team_key,
     get_league_settings,
-    LEAGUE_ID, TEAM_ID, GAME_KEY, DATA_DIR,
+    OAUTH_FILE, LEAGUE_ID, TEAM_ID, GAME_KEY, DATA_DIR,
     enrich_with_intel, enrich_with_trends,
 )
 
