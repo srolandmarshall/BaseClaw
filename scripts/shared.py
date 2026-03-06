@@ -16,6 +16,7 @@ import threading
 
 from yahoo_oauth import OAuth2
 import yahoo_fantasy_api as yfa
+from trace_utils import log_trace_event, monotonic_ms
 
 # ---------------------------------------------------------------------------
 # Environment / config
@@ -544,10 +545,14 @@ def enrich_with_intel(players, count=None, boost_scores=False, include=None):
         include: optional intel sections list (defaults to ["statcast", "trends"])
     """
     from intel import batch_intel
+    started = monotonic_ms()
+    status = "ok"
+    include_sections = include or ["statcast", "trends"]
+    player_count = len(players or [])
+    subset_size = min(player_count, count) if count else player_count
     try:
         subset = players[:count] if count else players
         names = [p.get("name", "") for p in subset]
-        include_sections = include or ["statcast", "trends"]
         intel_data = batch_intel(names, include=include_sections)
         for p in subset:
             pi = intel_data.get(p.get("name", ""))
@@ -567,7 +572,21 @@ def enrich_with_intel(players, count=None, boost_scores=False, include=None):
                 elif pi.get("trends", {}).get("hot_cold") == "warm":
                     p["score"] = p.get("score", 0) + 4
     except Exception as e:
+        status = "error"
         print("Warning: intel enrichment failed: " + str(e))
+    finally:
+        log_trace_event(
+            event="enrich_with_intel",
+            stage="shared.enrich_with_intel",
+            duration_ms=max(monotonic_ms() - started, 0),
+            cache_hit=None,
+            status=status,
+            gate="rankings",
+            player_count=player_count,
+            enriched_count=subset_size,
+            include_sections=include_sections,
+            boost_scores=boost_scores,
+        )
 
 
 def enrich_with_trends(players, count=None):

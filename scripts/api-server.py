@@ -10,7 +10,15 @@ import importlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, g
+from trace_utils import (
+    clear_trace_context,
+    get_trace_context,
+    log_trace_event,
+    monotonic_ms,
+    start_request_trace,
+    update_trace_context,
+)
 
 # Import modules (some have hyphens, need importlib)
 yahoo_fantasy = importlib.import_module("yahoo-fantasy")
@@ -24,6 +32,120 @@ import news
 import yahoo_browser
 
 app = Flask(__name__)
+
+
+def _safe_int(value, default=None):
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _emit_request_completion(status_code, error=None):
+    if getattr(g, "_trace_completion_emitted", False):
+        return
+
+    started = getattr(g, "_trace_started_ms", None)
+    duration_ms = 0
+    if started is not None:
+        duration_ms = max(monotonic_ms() - started, 0)
+
+    status = status_code if status_code is not None else 500
+    log_trace_event(
+        event="request_complete",
+        stage="http",
+        duration_ms=duration_ms,
+        cache_hit=None,
+        status=status,
+        gate="always",
+        force=True,
+        method=request.method,
+        query_params={k: v for k, v in request.args.items()},
+        research_run_id=get_trace_context().get("research_run_id", ""),
+        error=error,
+    )
+
+    if request.path == "/api/rankings":
+        stage_ms = dict(getattr(g, "_rankings_stage_ms", {}) or {})
+        known_ms = sum(stage_ms.get(k, 0) for k in ("arg_parse", "cmd_rankings", "serialization"))
+        response_write_ms = max(duration_ms - known_ms, 0)
+        stage_ms["response_write"] = response_write_ms
+        rankings_status = "ok" if int(status) < 400 else "error"
+        log_trace_event(
+            event="rankings_stage",
+            stage="response_write",
+            duration_ms=response_write_ms,
+            cache_hit=None,
+            status=rankings_status,
+            gate="rankings",
+        )
+        log_trace_event(
+            event="rankings_request_summary",
+            stage="summary",
+            duration_ms=duration_ms,
+            cache_hit=None,
+            status=status,
+            gate="rankings",
+            stage_durations_ms=stage_ms,
+            error=error,
+        )
+
+    g._trace_completion_emitted = True
+
+
+@app.before_request
+def _trace_before_request():
+    if not request.path.startswith("/api/"):
+        return
+
+    ctx = start_request_trace(
+        route=request.path,
+        method=request.method,
+        headers={k: v for k, v in request.headers.items()},
+        args={k: v for k, v in request.args.items()},
+    )
+    g._trace_started_ms = ctx.get("request_started_ms", monotonic_ms())
+    g._trace_completion_emitted = False
+    g._rankings_stage_ms = {}
+    log_trace_event(
+        event="request_start",
+        stage="http",
+        duration_ms=0,
+        cache_hit=None,
+        status="start",
+        gate="always",
+        force=True,
+        method=request.method,
+        query_params={k: v for k, v in request.args.items()},
+        research_run_id=ctx.get("research_run_id", ""),
+    )
+
+
+@app.after_request
+def _trace_after_request(response):
+    if not request.path.startswith("/api/"):
+        return response
+
+    ctx = get_trace_context()
+    request_id = ctx.get("request_id")
+    if request_id:
+        response.headers["X-Request-Id"] = request_id
+
+    _emit_request_completion(response.status_code)
+    return response
+
+
+@app.teardown_request
+def _trace_teardown_request(exc):
+    try:
+        if request.path.startswith("/api/") and exc is not None:
+            _emit_request_completion(500, error=str(exc))
+    except Exception:
+        pass
+    finally:
+        clear_trace_context()
 
 
 # --- Session heartbeat (keeps Yahoo cookies alive) ---
@@ -381,11 +503,43 @@ def api_best_available():
 
 @app.route("/api/rankings")
 def api_rankings():
+    def _timed_stage(stage_name, fn):
+        started = monotonic_ms()
+        status = "ok"
+        try:
+            return fn()
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            elapsed = max(monotonic_ms() - started, 0)
+            stage_map = dict(getattr(g, "_rankings_stage_ms", {}) or {})
+            stage_map[stage_name] = elapsed
+            g._rankings_stage_ms = stage_map
+            log_trace_event(
+                event="rankings_stage",
+                stage=stage_name,
+                duration_ms=elapsed,
+                cache_hit=None,
+                status=status,
+                gate="rankings",
+            )
+
     try:
-        pos_type = request.args.get("pos_type", "B")
-        count = request.args.get("count", "25")
-        result = valuations.cmd_rankings([pos_type, count], as_json=True)
-        return jsonify(result)
+        pos_type, count = _timed_stage(
+            "arg_parse",
+            lambda: (
+                request.args.get("pos_type", "B"),
+                request.args.get("count", "25"),
+            ),
+        )
+        update_trace_context(pos_type=pos_type, count=_safe_int(count, None))
+        result = _timed_stage(
+            "cmd_rankings",
+            lambda: valuations.cmd_rankings([pos_type, count], as_json=True),
+        )
+        response = _timed_stage("serialization", lambda: jsonify(result))
+        return response
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
