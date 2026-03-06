@@ -368,7 +368,7 @@ def api_best_available():
     try:
         pos_type = request.args.get("pos_type", "B")
         count = request.args.get("count", "25")
-        include_intel = request.args.get("include_intel", "true")
+        include_intel = request.args.get("include_intel", "false")
         result = draft_assistant.cmd_best_available([pos_type, count, include_intel], as_json=True)
         return jsonify(result)
     except Exception as e:
@@ -1828,4 +1828,4 @@ def api_achievements():
 
 if __name__ == "__main__":
     port = int(os.environ.get("API_PORT", "8766"))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, threaded=True)
