@@ -78,7 +78,7 @@ def get_schedule_for_range(start_date, end_date):
     """Get MLB schedule for a date range with probable pitchers"""
     if statsapi:
         try:
-            return statsapi.schedule(start_date=start_date, end_date=end_date, hydrate="probablePitcher")
+            return statsapi.schedule(start_date=start_date, end_date=end_date)
         except Exception as e:
             print("  Warning: statsapi range schedule failed: " + str(e))
     # Fallback
@@ -4090,7 +4090,7 @@ def cmd_pitcher_matchup(args, as_json=False):
         probable_map = {}  # pitcher_name_norm -> [game_info, ...]
         try:
             if statsapi:
-                prob_sched = statsapi.schedule(start_date=start_date, end_date=end_date, hydrate="probablePitcher")
+                prob_sched = statsapi.schedule(start_date=start_date, end_date=end_date)
                 for game in prob_sched:
                     game_date = game.get("game_date", "")
                     for side in ["away_probable_pitcher", "home_probable_pitcher"]:

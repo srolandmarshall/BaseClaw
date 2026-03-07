@@ -16,6 +16,7 @@ import os
 import time
 import re
 import json
+import threading
 import urllib.request
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -29,6 +30,8 @@ from shared import USER_AGENT, cache_get, cache_set, normalize_player_name, redd
 _cache = {}
 TTL_NEWS = 900      # 15 minutes (breaking news sources)
 TTL_ANALYSIS = 1800  # 30 minutes (analysis/editorial sources)
+_feed_warnings = {}
+_feed_warning_lock = threading.Lock()
 
 # Injury keywords to detect in titles and descriptions
 INJURY_KEYWORDS = [
@@ -42,6 +45,7 @@ INJURY_KEYWORDS = [
 # Pre-compiled regexes
 _TZ_ABBR_RE = re.compile(r"\s+[A-Z]{2,5}$")
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+_XML_CONTROL_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
 
 # ============================================================
 # 1. Feed Registry
@@ -169,6 +173,46 @@ def _cache_set(key, data):
     cache_set(_cache, key, data)
 
 
+def _record_feed_warning(source_name, warning_type, detail):
+    """Record one warning per source and only log when it changes."""
+    detail = str(detail or "").strip()
+    warning = {
+        "source": source_name,
+        "warning_type": warning_type,
+        "detail": detail,
+        "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    should_log = True
+    with _feed_warning_lock:
+        prev = _feed_warnings.get(source_name)
+        if prev and prev.get("warning_type") == warning_type and prev.get("detail") == detail:
+            should_log = False
+        _feed_warnings[source_name] = warning
+    if should_log:
+        print(
+            "Warning: RSS source="
+            + source_name
+            + " type="
+            + warning_type
+            + " detail="
+            + detail
+        )
+
+
+def _clear_feed_warning(source_name):
+    with _feed_warning_lock:
+        _feed_warnings.pop(source_name, None)
+
+
+def _get_feed_warnings(source_names=None):
+    with _feed_warning_lock:
+        warnings = list(_feed_warnings.values())
+    if source_names is None:
+        return warnings
+    allowed = set(source_names)
+    return [warning for warning in warnings if warning.get("source") in allowed]
+
+
 # ============================================================
 # 3. Name Matching
 # ============================================================
@@ -258,13 +302,28 @@ def _parse_pub_date(date_str):
     return date_str.strip()
 
 
-def _parse_rss_items(raw_xml):
-    """Parse RSS/Atom XML into a list of (title, link, description, pub_date) tuples."""
+def _sanitize_xml(raw_xml):
+    """Normalize malformed XML payloads before parsing."""
+    if raw_xml is None:
+        return ""
+    xml_text = str(raw_xml)
+    first_tag = xml_text.find("<")
+    if first_tag > 0:
+        xml_text = xml_text[first_tag:]
+    return _XML_CONTROL_RE.sub("", xml_text)
+
+
+def _parse_rss_items(raw_xml, source_name=""):
+    """Parse RSS/Atom XML into item tuples and optional warning metadata."""
+    sanitized = _sanitize_xml(raw_xml)
     try:
-        root = ET.fromstring(raw_xml)
+        root = ET.fromstring(sanitized)
     except ET.ParseError as e:
-        print("Error parsing RSS XML: " + str(e))
-        return []
+        return [], {
+            "source": source_name,
+            "warning_type": "rss_parse_error",
+            "detail": str(e),
+        }
 
     items = []
 
@@ -278,7 +337,7 @@ def _parse_rss_items(raw_xml):
                 (item.findtext("description") or "").strip(),
                 (item.findtext("pubDate") or "").strip(),
             ))
-        return items
+        return items, None
 
     # Atom: feed > entry
     ns = {"atom": "http://www.w3.org/2005/Atom"}
@@ -302,7 +361,7 @@ def _parse_rss_items(raw_xml):
                 (item.findtext("pubDate") or "").strip(),
             ))
 
-    return items
+    return items, None
 
 
 def _fetch_rss_feed(url, source_name, ttl=TTL_NEWS):
@@ -317,10 +376,18 @@ def _fetch_rss_feed(url, source_name, ttl=TTL_NEWS):
         with urllib.request.urlopen(req, timeout=15) as response:
             raw_xml = response.read().decode("utf-8")
     except Exception as e:
-        print("Error fetching " + source_name + " RSS: " + str(e))
+        _record_feed_warning(source_name, "rss_fetch_error", str(e))
         return []
 
-    raw_items = _parse_rss_items(raw_xml)
+    raw_items, parse_warning = _parse_rss_items(raw_xml, source_name=source_name)
+    if parse_warning:
+        _record_feed_warning(
+            source_name,
+            parse_warning.get("warning_type", "rss_parse_error"),
+            parse_warning.get("detail", ""),
+        )
+        return []
+
     entries = []
     for title, link, description, pub_date in raw_items:
         player = _extract_player_name(title)
@@ -346,6 +413,7 @@ def _fetch_rss_feed(url, source_name, ttl=TTL_NEWS):
             "raw_title": title,
         })
 
+    _clear_feed_warning(source_name)
     _cache_set(cache_key, entries)
     return entries
 
@@ -510,16 +578,17 @@ def cmd_news(args, as_json=False):
             limit = 20
 
     entries = fetch_news()
+    warnings = _get_feed_warnings(["RotoWire MLB"])
     if not entries:
         if as_json:
-            return {"news": [], "note": "No news fetched from RotoWire"}
+            return {"news": [], "warnings": warnings, "note": "No news fetched from RotoWire"}
         print("No news fetched from RotoWire RSS feed")
         return
 
     entries = entries[:limit]
 
     if as_json:
-        return {"news": entries, "count": len(entries)}
+        return {"news": entries, "warnings": warnings, "count": len(entries)}
 
     print("RotoWire MLB News")
     print("=" * 70)
@@ -560,14 +629,20 @@ def cmd_news_player(args, as_json=False):
     limit = 5
 
     matches = get_player_news(player_name, limit=limit)
+    warnings = _get_feed_warnings()
     if not matches:
         if as_json:
-            return {"news": [], "player": player_name, "note": "No news found for " + player_name}
+            return {
+                "news": [],
+                "warnings": warnings,
+                "player": player_name,
+                "note": "No news found for " + player_name,
+            }
         print("No news found for: " + player_name)
         return
 
     if as_json:
-        return {"news": matches, "player": player_name, "count": len(matches)}
+        return {"news": matches, "warnings": warnings, "player": player_name, "count": len(matches)}
 
     print("News for: " + player_name)
     print("=" * 70)
@@ -617,10 +692,11 @@ def cmd_news_feed(args, as_json=False):
         i += 1
 
     entries = fetch_aggregated_news(sources=sources, player=player, limit=limit)
+    warnings = _get_feed_warnings()
 
     if as_json:
         source_set = sorted(set(e.get("source", "") for e in entries if e.get("source")))
-        return {"entries": entries, "sources": source_set, "count": len(entries)}
+        return {"entries": entries, "sources": source_set, "warnings": warnings, "count": len(entries)}
 
     if not entries:
         print("No news found")
@@ -660,6 +736,7 @@ def cmd_news_sources(args, as_json=False):
             last_fetch = datetime.fromtimestamp(fetch_time).strftime("%Y-%m-%d %H:%M:%S")
             item_count = len(data) if isinstance(data, list) else 0
 
+        warnings = _get_feed_warnings([finfo["name"]])
         sources.append({
             "id": fid,
             "name": finfo["name"],
@@ -668,6 +745,7 @@ def cmd_news_sources(args, as_json=False):
             "enabled": finfo.get("enabled", True),
             "last_fetch": last_fetch,
             "item_count": item_count,
+            "warning": warnings[0] if warnings else None,
         })
 
     if as_json:

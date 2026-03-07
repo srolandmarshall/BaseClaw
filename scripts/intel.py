@@ -816,6 +816,68 @@ def _fetch_mlb_game_log(mlb_id, stat_group="hitting", days=30):
 # 5b. Regression & Buy-Low/Sell-High Detection
 # ============================================================
 
+def _is_fangraphs_parser_error(err):
+    msg = str(err or "").lower()
+    return (
+        "columns passed" in msg
+        or "passed data had" in msg
+        or "parse" in msg and "fangraphs" in msg
+    )
+
+
+def _df_looks_usable(df):
+    return df is not None and hasattr(df, "iterrows")
+
+
+def _parse_regression_df(df, season, field_map):
+    if not _df_looks_usable(df):
+        return {}
+    result = {}
+    for _, row in df.iterrows():
+        name = row.get("Name", "") if hasattr(row, "get") else ""
+        if not name:
+            continue
+        entry = {"data_season": season}
+        for key, col in field_map.items():
+            entry[key] = row.get(col, None) if hasattr(row, "get") else None
+        result[str(name).lower()] = entry
+    return result
+
+
+def _fetch_regression_dataset(stat_func, field_map):
+    """Fetch current season with resilient fallback for parser/shape failures."""
+    year = YEAR
+    try:
+        df = stat_func(year, qual=25)
+    except Exception as e:
+        if _is_fangraphs_parser_error(e):
+            df = None
+        elif date.today().month < 5:
+            df = None
+        else:
+            raise
+    if not _df_looks_usable(df):
+        # Parser/shape regressions can happen mid-season; prefer stale but usable data.
+        year = YEAR - 1
+        df = stat_func(year, qual=25)
+    elif len(df) == 0 and date.today().month < 5:
+        year = YEAR - 1
+        df = stat_func(year, qual=25)
+    result = _parse_regression_df(df, year, field_map)
+    if result:
+        return result, year
+    if year != YEAR:
+        # Last chance if fallback year returned malformed shape.
+        try:
+            df = stat_func(YEAR, qual=25)
+            result = _parse_regression_df(df, YEAR, field_map)
+            if result:
+                return result, YEAR
+        except Exception:
+            pass
+    return {}, year
+
+
 def _fetch_fangraphs_regression_batting():
     """Fetch FanGraphs batting stats needed for regression detection.
     Extracts BABIP, wOBA, wRC+ for BABIP-based luck signals.
@@ -826,30 +888,16 @@ def _fetch_fangraphs_regression_batting():
         return cached
     try:
         from pybaseball import batting_stats
-        year = YEAR
-        try:
-            df = batting_stats(year, qual=25)
-        except Exception:
-            if date.today().month < 5:
-                year = YEAR - 1
-                df = batting_stats(year, qual=25)
-            else:
-                raise
-        if (df is None or len(df) == 0) and date.today().month < 5:
-            year = YEAR - 1
-            df = batting_stats(year, qual=25)
-        result = {}
-        if df is not None:
-            for _, row in df.iterrows():
-                name = row.get("Name", "")
-                if name:
-                    result[name.lower()] = {
-                        "babip": row.get("BABIP", None),
-                        "woba": row.get("wOBA", None),
-                        "wrc_plus": row.get("wRC+", None),
-                        "pa": row.get("PA", None),
-                        "data_season": year,
-                    }
+
+        result, _ = _fetch_regression_dataset(
+            batting_stats,
+            {
+                "babip": "BABIP",
+                "woba": "wOBA",
+                "wrc_plus": "wRC+",
+                "pa": "PA",
+            },
+        )
         _cache_set(cache_key, result)
         return result
     except Exception as e:
@@ -878,33 +926,18 @@ def _fetch_fangraphs_regression_pitching():
         return cached
     try:
         from pybaseball import pitching_stats
-        year = YEAR
-        try:
-            df = pitching_stats(year, qual=25)
-        except Exception:
-            if date.today().month < 5:
-                year = YEAR - 1
-                df = pitching_stats(year, qual=25)
-            else:
-                raise
-        if (df is None or len(df) == 0) and date.today().month < 5:
-            year = YEAR - 1
-            df = pitching_stats(year, qual=25)
-        result = {}
-        if df is not None:
-            for _, row in df.iterrows():
-                name = row.get("Name", "")
-                if name:
-                    result[name.lower()] = {
-                        "era": row.get("ERA", None),
-                        "fip": row.get("FIP", None),
-                        "xfip": row.get("xFIP", None),
-                        "babip": row.get("BABIP", None),
-                        "lob_pct": row.get("LOB%", None),
-                        "siera": row.get("SIERA", None),
-                        "ip": row.get("IP", None),
-                        "data_season": year,
-                    }
+        result, year = _fetch_regression_dataset(
+            pitching_stats,
+            {
+                "era": "ERA",
+                "fip": "FIP",
+                "xfip": "xFIP",
+                "babip": "BABIP",
+                "lob_pct": "LOB%",
+                "siera": "SIERA",
+                "ip": "IP",
+            },
+        )
         _cache_set(cache_key, result)
         log_trace_event(
             event="intel_cache",
