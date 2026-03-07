@@ -39,6 +39,7 @@ import history
 import intel
 import news
 import yahoo_browser
+import player_universe
 
 app = Flask(__name__)
 
@@ -1231,6 +1232,25 @@ def api_taken_players():
         position = request.args.get("position", "")
         args = [position] if position else []
         result = yahoo_fantasy.cmd_taken_players(args, as_json=True)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/player-universe")
+def api_player_universe():
+    try:
+        max_players = _safe_int(request.args.get("count"), 120)
+        if max_players is None:
+            max_players = 120
+
+        from shared import get_league_settings
+
+        result = player_universe.build_player_universe(
+            yahoo_fantasy=yahoo_fantasy,
+            league_context_fetcher=get_league_settings,
+            max_players_per_group=max_players,
+        )
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
