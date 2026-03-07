@@ -11,6 +11,15 @@ import importlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from flask import Flask, jsonify, request, g
+from position_batching import (
+    best_available_position_tokens as _best_available_position_tokens,
+    disagreement_position_tokens as _disagreement_position_tokens,
+    grouped_all_payload as _grouped_all_payload,
+    normalize_hitter_payload as _normalize_hitter_payload,
+    parse_hitter_positions_csv as _parse_hitter_positions_csv,
+    ranking_position_tokens as _ranking_position_tokens,
+    safe_bool as _safe_bool,
+)
 from trace_utils import (
     clear_trace_context,
     get_trace_context,
@@ -488,11 +497,36 @@ def api_draft_cheatsheet():
 @app.route("/api/best-available")
 def api_best_available():
     try:
-        pos_type = request.args.get("pos_type", "B")
+        pos_type = request.args.get("pos_type", "B").upper()
         count = request.args.get("count", "25")
         include_intel = request.args.get("include_intel", "false")
-        result = draft_assistant.cmd_best_available([pos_type, count, include_intel], as_json=True)
+        group_by_position = _safe_bool(request.args.get("group_by_position", "false"))
+        positions = _parse_hitter_positions_csv(request.args.get("positions", ""))
+
+        if pos_type == "ALL":
+            hitters = draft_assistant.cmd_best_available(["B", count, include_intel], as_json=True)
+            pitchers = draft_assistant.cmd_best_available(["P", count, include_intel], as_json=True)
+            hitters = _normalize_hitter_payload(
+                hitters,
+                "players",
+                positions,
+                group_by_position,
+                _best_available_position_tokens,
+            )
+            result = _grouped_all_payload(hitters, pitchers)
+        else:
+            result = draft_assistant.cmd_best_available([pos_type, count, include_intel], as_json=True)
+            if pos_type == "B":
+                result = _normalize_hitter_payload(
+                    result,
+                    "players",
+                    positions,
+                    group_by_position,
+                    _best_available_position_tokens,
+                )
         return jsonify(result)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -526,20 +560,49 @@ def api_rankings():
             )
 
     try:
-        pos_type, count = _timed_stage(
+        pos_type, count, group_by_position, positions = _timed_stage(
             "arg_parse",
             lambda: (
-                request.args.get("pos_type", "B"),
+                request.args.get("pos_type", "B").upper(),
                 request.args.get("count", "25"),
+                _safe_bool(request.args.get("group_by_position", "false")),
+                _parse_hitter_positions_csv(request.args.get("positions", "")),
             ),
         )
         update_trace_context(pos_type=pos_type, count=_safe_int(count, None))
-        result = _timed_stage(
-            "cmd_rankings",
-            lambda: valuations.cmd_rankings([pos_type, count], as_json=True),
-        )
+
+        if pos_type == "ALL":
+            hitters = _timed_stage(
+                "cmd_rankings",
+                lambda: valuations.cmd_rankings(["B", count], as_json=True),
+            )
+            pitchers = valuations.cmd_rankings(["P", count], as_json=True)
+            hitters = _normalize_hitter_payload(
+                hitters,
+                "players",
+                positions,
+                group_by_position,
+                _ranking_position_tokens,
+            )
+            result = _grouped_all_payload(hitters, pitchers)
+        else:
+            result = _timed_stage(
+                "cmd_rankings",
+                lambda: valuations.cmd_rankings([pos_type, count], as_json=True),
+            )
+            if pos_type == "B":
+                result = _normalize_hitter_payload(
+                    result,
+                    "players",
+                    positions,
+                    group_by_position,
+                    _ranking_position_tokens,
+                )
+
         response = _timed_stage("serialization", lambda: jsonify(result))
         return response
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -587,11 +650,45 @@ def api_projections_update():
 @app.route("/api/projection-disagreements", methods=["GET"])
 def api_projection_disagreements():
     try:
-        pos_type = request.args.get("pos_type", "B")
+        pos_type = request.args.get("pos_type", "B").upper()
         count = int(request.args.get("count", "20"))
+        group_by_position = _safe_bool(request.args.get("group_by_position", "false"))
+        positions = _parse_hitter_positions_csv(request.args.get("positions", ""))
+
+        if pos_type == "ALL":
+            hitters = {
+                "pos_type": "B",
+                "disagreements": valuations.compute_projection_disagreements(stats_type="bat", count=count),
+            }
+            pitchers = {
+                "pos_type": "P",
+                "disagreements": valuations.compute_projection_disagreements(stats_type="pit", count=count),
+            }
+            hitters = _normalize_hitter_payload(
+                hitters,
+                "disagreements",
+                positions,
+                group_by_position,
+                _disagreement_position_tokens,
+            )
+            return jsonify(_grouped_all_payload(hitters, pitchers))
+
         stats_type = "bat" if pos_type == "B" else "pit"
-        result = valuations.compute_projection_disagreements(stats_type=stats_type, count=count)
-        return jsonify({"pos_type": pos_type, "disagreements": result})
+        result = {
+            "pos_type": pos_type,
+            "disagreements": valuations.compute_projection_disagreements(stats_type=stats_type, count=count),
+        }
+        if pos_type == "B":
+            result = _normalize_hitter_payload(
+                result,
+                "disagreements",
+                positions,
+                group_by_position,
+                _disagreement_position_tokens,
+            )
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
