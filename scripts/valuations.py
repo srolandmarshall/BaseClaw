@@ -13,6 +13,7 @@ import pandas as pd
 import numpy as np
 from mlb_id_cache import get_mlb_id
 from shared import enrich_with_intel
+from trace_utils import log_trace_event, monotonic_ms
 
 DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
 
@@ -124,6 +125,9 @@ def fetch_consensus_projections(stats_type):
 
     dfs = {}
     for system, weight in systems:
+        started_system = monotonic_ms()
+        cache_hit = False
+        status = "ok"
         # Check per-system cache first
         sys_path = _proj_csv_path(stats_type, proj_type=system)
         if _proj_csv_is_fresh(sys_path):
@@ -131,9 +135,19 @@ def fetch_consensus_projections(stats_type):
                 df = pd.read_csv(sys_path)
                 df.columns = df.columns.str.strip()
                 dfs[system] = (df, weight)
+                cache_hit = True
+                log_trace_event(
+                    event="valuation_projection_system",
+                    stage="fetch_consensus_projections." + system,
+                    duration_ms=max(monotonic_ms() - started_system, 0),
+                    cache_hit=cache_hit,
+                    status=status,
+                    gate="always",
+                    stats_type=stats_type,
+                )
                 continue
             except Exception:
-                pass
+                status = "error"
 
         print("Fetching " + system + " projections for " + stats_type + "...")
         df = fetch_fangraphs_projections(stats_type, proj_type=system)
@@ -143,7 +157,17 @@ def fetch_consensus_projections(stats_type):
             df.to_csv(sys_path, index=False)
             dfs[system] = (df, weight)
         else:
+            status = "error"
             print("Warning: " + system + " projections unavailable for " + stats_type)
+        log_trace_event(
+            event="valuation_projection_system",
+            stage="fetch_consensus_projections." + system,
+            duration_ms=max(monotonic_ms() - started_system, 0),
+            cache_hit=cache_hit,
+            status=status,
+            gate="always",
+            stats_type=stats_type,
+        )
 
     if not dfs:
         return None
@@ -230,15 +254,29 @@ def ensure_projections(proj_type="consensus", force=False):
     proj_type: 'consensus' (default), 'steamer', 'zips', or 'fangraphsdc'
     Returns dict describing what happened for each type.
     """
+    started_total = monotonic_ms()
     os.makedirs(DATA_DIR, exist_ok=True)
     results = {}
 
     for stats_type in ["bat", "pit"]:
+        started_system = monotonic_ms()
         path = _proj_csv_path(stats_type)
         label = "hitters" if stats_type == "bat" else "pitchers"
+        status = "ok"
+        cache_hit = False
 
         if not force and _proj_csv_is_fresh(path):
             results[label] = "cached"
+            cache_hit = True
+            log_trace_event(
+                event="valuation_projection_refresh",
+                stage="ensure_projections_" + label,
+                duration_ms=max(monotonic_ms() - started_system, 0),
+                cache_hit=cache_hit,
+                status=status,
+                gate="always",
+                projection_system=proj_type,
+            )
             continue
 
         if proj_type == "consensus":
@@ -253,8 +291,31 @@ def ensure_projections(proj_type="consensus", force=False):
             results[label] = "fetched (" + str(len(df)) + " players)"
             print("Saved " + str(len(df)) + " " + label + " projections to " + path)
         else:
+            status = "error"
             results[label] = "failed"
             print("Could not fetch " + label + " projections")
+
+        log_trace_event(
+            event="valuation_projection_refresh",
+            stage="ensure_projections_" + label,
+            duration_ms=max(monotonic_ms() - started_system, 0),
+            cache_hit=cache_hit,
+            status=status,
+            gate="always",
+            projection_system=proj_type,
+        )
+
+    log_trace_event(
+        event="valuation_projection_refresh_summary",
+        stage="ensure_projections",
+        duration_ms=max(monotonic_ms() - started_total, 0),
+        cache_hit=None,
+        status="ok",
+        gate="always",
+        projection_system=proj_type,
+        force=force,
+        results=results,
+    )
 
     return results
 
@@ -830,9 +891,19 @@ def _build_rank_lookup(df):
 def _get_loaded_data():
     """Get cached hitters/pitchers DataFrames, reloading if stale"""
     import time as _time
+    started = monotonic_ms()
     now = _time.time()
     if (_loaded_cache["hitters"] is not None
             and now - _loaded_cache["time"] < _LOAD_CACHE_TTL):
+        log_trace_event(
+            event="valuation_cache",
+            stage="_get_loaded_data",
+            duration_ms=max(monotonic_ms() - started, 0),
+            cache_hit=True,
+            status="ok",
+            gate="rankings",
+            source=_loaded_cache.get("source"),
+        )
         return _loaded_cache["hitters"], _loaded_cache["pitchers"], _loaded_cache["source"]
     h, p, s = load_all()
     _loaded_cache["hitters"] = h
@@ -844,6 +915,15 @@ def _get_loaded_data():
     _loaded_cache["tier_thresholds_P"] = _compute_tier_thresholds(p)
     _loaded_cache["rank_lookup_B"] = _build_rank_lookup(h)
     _loaded_cache["rank_lookup_P"] = _build_rank_lookup(p)
+    log_trace_event(
+        event="valuation_cache",
+        stage="_get_loaded_data",
+        duration_ms=max(monotonic_ms() - started, 0),
+        cache_hit=False,
+        status="ok",
+        gate="rankings",
+        source=s,
+    )
     return h, p, s
 
 
@@ -1203,11 +1283,16 @@ def load_all():
     """Load and compute valuations from best available data source.
     Priority: manual CSV (if fresh) -> auto-fetched projections -> JSON fallback
     """
+    started_total = monotonic_ms()
     h_csv = load_hitters_csv()
     p_csv = load_pitchers_csv()
+    initial_has_hitters = h_csv is not None
+    initial_has_pitchers = p_csv is not None
 
     # Auto-fetch projections if CSVs missing
     if h_csv is None or p_csv is None:
+        started_fetch = monotonic_ms()
+        fetch_status = "ok"
         try:
             ensure_projections()
             if h_csv is None:
@@ -1215,7 +1300,20 @@ def load_all():
             if p_csv is None:
                 p_csv = load_pitchers_csv()
         except Exception as e:
+            fetch_status = "error"
             print("Warning: auto-fetch projections failed: " + str(e))
+        log_trace_event(
+            event="valuation_stage",
+            stage="load_all.ensure_projections",
+            duration_ms=max(monotonic_ms() - started_fetch, 0),
+            cache_hit=False,
+            status=fetch_status,
+            gate="rankings",
+            missing_before_fetch={
+                "hitters": not initial_has_hitters,
+                "pitchers": not initial_has_pitchers,
+            },
+        )
 
     hitters = None
     pitchers = None
@@ -1223,6 +1321,8 @@ def load_all():
 
     # In-season blending: blend projections with live stats (April+)
     if h_csv is not None and date.today().month >= 4:
+        started_blend = monotonic_ms()
+        blend_status = "ok"
         try:
             live_h, live_p = load_live_stats()
             if live_h is not None and len(live_h) > 0:
@@ -1232,7 +1332,17 @@ def load_all():
                 p_csv = blend_projections_and_actual(p_csv, live_p, stat_type="pit")
                 source = "blended"
         except Exception as e:
+            blend_status = "error"
             print("Warning: live stats blending failed: " + str(e))
+        log_trace_event(
+            event="valuation_stage",
+            stage="load_all.blend_live_stats",
+            duration_ms=max(monotonic_ms() - started_blend, 0),
+            cache_hit=False,
+            status=blend_status,
+            gate="rankings",
+            blended=source == "blended",
+        )
 
     if h_csv is not None:
         h_derived = derive_hitter_stats(h_csv)
@@ -1257,6 +1367,24 @@ def load_all():
             pitchers = p_json
             if hitters is not None and source == "csv":
                 source = "mixed"
+
+    log_trace_event(
+        event="valuation_load_all_summary",
+        stage="load_all",
+        duration_ms=max(monotonic_ms() - started_total, 0),
+        cache_hit=False,
+        status="ok",
+        gate="rankings",
+        source=source,
+        input_path={
+            "hitters_csv": initial_has_hitters,
+            "pitchers_csv": initial_has_pitchers,
+        },
+        output_path={
+            "has_hitters": hitters is not None and len(hitters) > 0,
+            "has_pitchers": pitchers is not None and len(pitchers) > 0,
+        },
+    )
 
     return hitters, pitchers, source
 
@@ -1294,45 +1422,110 @@ def _safe_float(val):
 
 def cmd_rankings(args, as_json=False):
     """Show top N players by z-score value"""
+    def _timed_cmd_stage(stage_name, fn):
+        started = monotonic_ms()
+        status = "ok"
+        try:
+            return fn()
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            log_trace_event(
+                event="valuation_stage",
+                stage="cmd_rankings." + stage_name,
+                duration_ms=max(monotonic_ms() - started, 0),
+                cache_hit=None,
+                status=status,
+                gate="rankings",
+            )
+
+    started_total = monotonic_ms()
     pos_type = args[0].upper() if args else "B"
     count = int(args[1]) if len(args) > 1 else 25
 
-    hitters, pitchers, source = load_all()
+    hitters, pitchers, source = _timed_cmd_stage("load_all", load_all)
 
     if pos_type == "B":
         if hitters is None or len(hitters) == 0:
             if as_json:
+                log_trace_event(
+                    event="valuation_cmd_rankings_summary",
+                    stage="cmd_rankings",
+                    duration_ms=max(monotonic_ms() - started_total, 0),
+                    cache_hit=None,
+                    status="ok",
+                    gate="rankings",
+                    source=source,
+                    pos_type=pos_type,
+                    requested_count=count,
+                    players_returned=0,
+                )
                 return {"source": source, "pos_type": pos_type, "players": []}
             print("Data source: " + source)
             print("No hitter data available")
             return
-        df = hitters.sort_values("Z_Final", ascending=False).head(count)
+        df = _timed_cmd_stage(
+            "sort_head",
+            lambda: hitters.sort_values("Z_Final", ascending=False).head(count),
+        )
     else:
         if pitchers is None or len(pitchers) == 0:
             if as_json:
+                log_trace_event(
+                    event="valuation_cmd_rankings_summary",
+                    stage="cmd_rankings",
+                    duration_ms=max(monotonic_ms() - started_total, 0),
+                    cache_hit=None,
+                    status="ok",
+                    gate="rankings",
+                    source=source,
+                    pos_type=pos_type,
+                    requested_count=count,
+                    players_returned=0,
+                )
                 return {"source": source, "pos_type": pos_type, "players": []}
             print("Data source: " + source)
             print("No pitcher data available")
             return
-        df = pitchers.sort_values("Z_Final", ascending=False).head(count)
+        df = _timed_cmd_stage(
+            "sort_head",
+            lambda: pitchers.sort_values("Z_Final", ascending=False).head(count),
+        )
 
     if as_json:
-        players = []
-        for i, (_, row) in enumerate(df.iterrows(), 1):
-            z = _safe_float(row.get("Z_Final", 0))
-            entry = {
-                "rank": i,
-                "name": str(row.get("Name", "?")),
-                "team": str(row.get("Team", "")),
-                "pos": str(row.get("Pos", "")),
-                "z_score": round(z, 2),
-                "mlb_id": get_mlb_id(str(row.get("Name", ""))),
-            }
-            pf = row.get("ParkFactor")
-            if pf is not None and not pd.isna(pf):
-                entry["park_factor"] = round(float(pf), 2)
-            players.append(entry)
-        enrich_with_intel(players)
+        def _serialize_players():
+            out = []
+            for i, (_, row) in enumerate(df.iterrows(), 1):
+                z = _safe_float(row.get("Z_Final", 0))
+                entry = {
+                    "rank": i,
+                    "name": str(row.get("Name", "?")),
+                    "team": str(row.get("Team", "")),
+                    "pos": str(row.get("Pos", "")),
+                    "z_score": round(z, 2),
+                    "mlb_id": get_mlb_id(str(row.get("Name", ""))),
+                }
+                pf = row.get("ParkFactor")
+                if pf is not None and not pd.isna(pf):
+                    entry["park_factor"] = round(float(pf), 2)
+                out.append(entry)
+            return out
+
+        players = _timed_cmd_stage("player_serialization", _serialize_players)
+        _timed_cmd_stage("enrich_with_intel", lambda: enrich_with_intel(players))
+        log_trace_event(
+            event="valuation_cmd_rankings_summary",
+            stage="cmd_rankings",
+            duration_ms=max(monotonic_ms() - started_total, 0),
+            cache_hit=None,
+            status="ok",
+            gate="rankings",
+            source=source,
+            pos_type=pos_type,
+            requested_count=count,
+            players_returned=len(players),
+        )
         return {"source": source, "pos_type": pos_type, "players": players}
 
     print("Data source: " + source)

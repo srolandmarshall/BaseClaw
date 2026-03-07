@@ -163,7 +163,7 @@ export function registerDraftTools(server: McpServer, distDir: string) {
     },
     async ({ pos_type, count }) => {
       try {
-        const data = await apiGet<BestAvailableResponse>("/api/best-available", { pos_type, count: String(count) });
+        const data = await apiGet<BestAvailableResponse>("/api/best-available", { pos_type, count: String(count), include_intel: "false" });
         const label = pos_type === "B" ? "Hitters" : "Pitchers";
         const text = "Best Available " + label + ":\n" + data.players.map((p) => {
           const tier = (p.intel && p.intel.statcast && p.intel.statcast.quality_tier) ? " {" + p.intel.statcast.quality_tier + "}" : "";

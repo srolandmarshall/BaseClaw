@@ -1,4 +1,6 @@
 .env
+.DS_Store
+/tmp/
 config/yahoo_oauth.json
 config/yahoo_session.json
 data/player-rankings-*.json
@@ -27,3 +29,4 @@ skills-lock.json
 data/projections_*.csv
 scripts/openclaw-skill/.injury-state.json
 research_yahoo_write_workaround/
+/plans

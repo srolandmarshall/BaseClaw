@@ -9,17 +9,38 @@ import json
 import time
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from yahoo_oauth import OAuth2
 import yahoo_fantasy_api as yfa
 from valuations import load_all, get_player_by_name
 from mlb_id_cache import get_mlb_id
-from shared import enrich_with_intel, get_team_key, OAUTH_FILE, LEAGUE_ID
+from shared import enrich_with_intel, get_team_key, get_connection, LEAGUE_ID
 
 TEAM_ID = os.environ.get("TEAM_ID", "")
+_BEST_AVAILABLE_CACHE = {}
+_BEST_AVAILABLE_TTL = int(os.environ.get("BEST_AVAILABLE_CACHE_TTL_SECONDS", "45"))
+_BEST_AVAILABLE_INTEL_COUNT = int(os.environ.get("BEST_AVAILABLE_INTEL_COUNT", "8"))
+
+
+def _truthy(value):
+    return str(value).strip().lower() not in ("0", "false", "no", "off", "")
+
+
+def _best_available_cache_get(key):
+    entry = _BEST_AVAILABLE_CACHE.get(key)
+    if entry is None:
+        return None
+    data, ts = entry
+    if time.time() - ts > _BEST_AVAILABLE_TTL:
+        del _BEST_AVAILABLE_CACHE[key]
+        return None
+    return data
+
+
+def _best_available_cache_set(key, value):
+    _BEST_AVAILABLE_CACHE[key] = (value, time.time())
 
 class DraftAssistant:
     def __init__(self):
-        self.sc = OAuth2(None, None, from_file=OAUTH_FILE)
+        self.sc = get_connection()
         self.gm = yfa.Game(self.sc, "mlb")
         self.lg = self.gm.to_league(LEAGUE_ID)
         self.team_key = get_team_key(self.lg) or TEAM_ID
@@ -361,6 +382,13 @@ def cmd_best_available(args, as_json=False):
     """Show ranked available players with z-scores"""
     pos_type = args[0].upper() if args else "B"
     count = int(args[1]) if len(args) > 1 else 25
+    include_intel = _truthy(args[2]) if len(args) > 2 else True
+
+    cache_key = (pos_type, count, include_intel)
+    if as_json:
+        cached = _best_available_cache_get(cache_key)
+        if cached is not None:
+            return cached
 
     da = DraftAssistant()
     da.refresh()
@@ -378,8 +406,14 @@ def cmd_best_available(args, as_json=False):
                 "z_score": round(float(z), 2) if z is not None else None,
                 "mlb_id": get_mlb_id(p.get("name", "")),
             })
-        enrich_with_intel(players)
-        return {"pos_type": pos_type, "players": players}
+        if include_intel and players:
+            enrich_count = max(0, min(len(players), _BEST_AVAILABLE_INTEL_COUNT))
+            if enrich_count > 0:
+                # Keep this endpoint fast: top-N only, statcast-only.
+                enrich_with_intel(players, count=enrich_count, include=["statcast"])
+        result = {"pos_type": pos_type, "players": players}
+        _best_available_cache_set(cache_key, result)
+        return result
 
     label = "Hitters" if pos_type == "B" else "Pitchers"
     print("\nBest Available " + label + " (by Z-Score):")

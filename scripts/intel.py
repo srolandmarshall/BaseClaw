@@ -17,6 +17,7 @@ import json
 import time
 import csv
 import io
+import threading
 import urllib.request
 import urllib.parse
 from datetime import date, datetime, timedelta
@@ -27,6 +28,7 @@ from mlb_id_cache import get_mlb_id
 import sqlite3
 from shared import MLB_API, mlb_fetch as _mlb_fetch, USER_AGENT, DATA_DIR, reddit_get
 from shared import normalize_player_name as _normalize_name
+from trace_utils import log_trace_event, monotonic_ms, trace_config
 
 # Current year for all API calls
 YEAR = date.today().year
@@ -107,30 +109,34 @@ def _cache_set(key, data):
 # 1b. Arsenal Snapshot Database
 # ============================================================
 
-_intel_db = None
+_intel_db_local = threading.local()
+_intel_db_lock = threading.Lock()
 
 
 def _get_intel_db():
-    """Get SQLite connection for intel snapshots (reuses season.db)"""
-    global _intel_db
-    if _intel_db is not None:
-        return _intel_db
+    """Get thread-local SQLite connection for intel snapshots."""
+    db = getattr(_intel_db_local, "conn", None)
+    if db is not None:
+        return db
     db_path = os.path.join(DATA_DIR, "season.db")
-    _intel_db = sqlite3.connect(db_path)
-    _intel_db.execute(
-        "CREATE TABLE IF NOT EXISTS arsenal_snapshots "
-        "(player_name TEXT, date TEXT, pitch_type TEXT, "
-        "usage_pct REAL, velocity REAL, spin_rate REAL, "
-        "whiff_rate REAL, "
-        "PRIMARY KEY (player_name, date, pitch_type))"
-    )
-    _intel_db.execute(
-        "CREATE TABLE IF NOT EXISTS statcast_snapshots "
-        "(player_name TEXT, date TEXT, metric TEXT, value REAL, "
-        "PRIMARY KEY (player_name, date, metric))"
-    )
-    _intel_db.commit()
-    return _intel_db
+    db = sqlite3.connect(db_path, timeout=30)
+    # Each worker thread gets its own connection; guard schema setup writes.
+    with _intel_db_lock:
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS arsenal_snapshots "
+            "(player_name TEXT, date TEXT, pitch_type TEXT, "
+            "usage_pct REAL, velocity REAL, spin_rate REAL, "
+            "whiff_rate REAL, "
+            "PRIMARY KEY (player_name, date, pitch_type))"
+        )
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS statcast_snapshots "
+            "(player_name TEXT, date TEXT, metric TEXT, value REAL, "
+            "PRIMARY KEY (player_name, date, metric))"
+        )
+        db.commit()
+    _intel_db_local.conn = db
+    return db
 
 
 def _save_statcast_snapshot(name, statcast_data):
@@ -232,10 +238,22 @@ def _savant_with_fallback(url_template, cache_prefix, player_type):
     """Fetch Savant data with pre-season fallback to prior year.
     Returns (indexed_rows, data_season) tuple.
     """
+    started = monotonic_ms()
+    stage = "intel." + cache_prefix
     year = YEAR
     cache_key = (cache_prefix, player_type, year)
     cached = _cache_get(cache_key, TTL_SAVANT)
     if cached is not None:
+        log_trace_event(
+            event="intel_cache",
+            stage=stage,
+            duration_ms=max(monotonic_ms() - started, 0),
+            cache_hit=True,
+            status="ok",
+            gate="rankings",
+            player_type=player_type,
+            data_season=year,
+        )
         return cached
 
     url = url_template.replace("{YEAR}", str(year))
@@ -248,6 +266,16 @@ def _savant_with_fallback(url_template, cache_prefix, player_type):
         fallback_key = (cache_prefix, player_type, year)
         cached_fb = _cache_get(fallback_key, TTL_SAVANT)
         if cached_fb is not None:
+            log_trace_event(
+                event="intel_cache",
+                stage=stage,
+                duration_ms=max(monotonic_ms() - started, 0),
+                cache_hit=True,
+                status="ok",
+                gate="rankings",
+                player_type=player_type,
+                data_season=year,
+            )
             return cached_fb
         url = url_template.replace("{YEAR}", str(year))
         rows = _fetch_csv(url)
@@ -256,11 +284,33 @@ def _savant_with_fallback(url_template, cache_prefix, player_type):
             result["__data_season"] = year
             _cache_set(fallback_key, result)
             _cache_set(cache_key, result)
+            log_trace_event(
+                event="intel_cache",
+                stage=stage,
+                duration_ms=max(monotonic_ms() - started, 0),
+                cache_hit=False,
+                status="ok",
+                gate="rankings",
+                player_type=player_type,
+                data_season=year,
+                rows=len(result),
+            )
             return result
 
     if result:
         result["__data_season"] = year
     _cache_set(cache_key, result)
+    log_trace_event(
+        event="intel_cache",
+        stage=stage,
+        duration_ms=max(monotonic_ms() - started, 0),
+        cache_hit=False,
+        status="ok",
+        gate="rankings",
+        player_type=player_type,
+        data_season=year,
+        rows=len(result),
+    )
     return result
 
 
@@ -777,7 +827,14 @@ def _fetch_fangraphs_regression_batting():
     try:
         from pybaseball import batting_stats
         year = YEAR
-        df = batting_stats(year, qual=25)
+        try:
+            df = batting_stats(year, qual=25)
+        except Exception:
+            if date.today().month < 5:
+                year = YEAR - 1
+                df = batting_stats(year, qual=25)
+            else:
+                raise
         if (df is None or len(df) == 0) and date.today().month < 5:
             year = YEAR - 1
             df = batting_stats(year, qual=25)
@@ -797,6 +854,7 @@ def _fetch_fangraphs_regression_batting():
         return result
     except Exception as e:
         print("Warning: FanGraphs regression batting fetch failed: " + str(e))
+        _cache_set(cache_key, {})
         return {}
 
 
@@ -804,14 +862,31 @@ def _fetch_fangraphs_regression_pitching():
     """Fetch FanGraphs pitching stats needed for regression detection.
     Extracts ERA, FIP, xFIP, BABIP, LOB%, SIERA for luck-based signals.
     """
+    started = monotonic_ms()
     cache_key = ("fangraphs_regression_pitching", YEAR)
     cached = _cache_get(cache_key, TTL_FANGRAPHS)
     if cached is not None:
+        log_trace_event(
+            event="intel_cache",
+            stage="intel.fangraphs_regression_pitching",
+            duration_ms=max(monotonic_ms() - started, 0),
+            cache_hit=True,
+            status="ok",
+            gate="rankings",
+            data_season=YEAR,
+        )
         return cached
     try:
         from pybaseball import pitching_stats
         year = YEAR
-        df = pitching_stats(year, qual=25)
+        try:
+            df = pitching_stats(year, qual=25)
+        except Exception:
+            if date.today().month < 5:
+                year = YEAR - 1
+                df = pitching_stats(year, qual=25)
+            else:
+                raise
         if (df is None or len(df) == 0) and date.today().month < 5:
             year = YEAR - 1
             df = pitching_stats(year, qual=25)
@@ -831,9 +906,30 @@ def _fetch_fangraphs_regression_pitching():
                         "data_season": year,
                     }
         _cache_set(cache_key, result)
+        log_trace_event(
+            event="intel_cache",
+            stage="intel.fangraphs_regression_pitching",
+            duration_ms=max(monotonic_ms() - started, 0),
+            cache_hit=False,
+            status="ok",
+            gate="rankings",
+            data_season=year,
+            rows=len(result),
+        )
         return result
     except Exception as e:
         print("Warning: FanGraphs regression pitching fetch failed: " + str(e))
+        _cache_set(cache_key, {})
+        log_trace_event(
+            event="intel_cache",
+            stage="intel.fangraphs_regression_pitching",
+            duration_ms=max(monotonic_ms() - started, 0),
+            cache_hit=False,
+            status="error",
+            gate="rankings",
+            data_season=YEAR,
+            error=str(e),
+        )
         return {}
 
 
@@ -1714,27 +1810,60 @@ def _build_batted_ball_profile(name):
     Fetches from FanGraphs via pybaseball pitching_stats which includes
     GB%, FB%, LD%, Hard%, and barrel data. Uses _cache_manager for caching.
     """
+    started = monotonic_ms()
     cache_key = "batted_ball_profile:" + _normalize_name(name)
+
+    def _finish(result, status="ok", cache_hit=False):
+        log_trace_event(
+            event="intel_cache",
+            stage="intel._build_batted_ball_profile",
+            duration_ms=max(monotonic_ms() - started, 0),
+            cache_hit=cache_hit,
+            status=status,
+            gate="rankings",
+            player_name=name,
+        )
+        return result
+
     cached = _cache_manager.get(cache_key, ttl=TTL_FANGRAPHS)
     if cached is not None:
-        return cached
+        return _finish(cached, status="ok", cache_hit=True)
 
+    year = YEAR
     try:
         from pybaseball import pitching_stats
         df_cache_key = ("batted_ball_df", YEAR)
-        df = _cache_get(df_cache_key, TTL_FANGRAPHS)
+        fetch_error = None
+        df_payload = _cache_get(df_cache_key, TTL_FANGRAPHS)
+        if isinstance(df_payload, dict):
+            df = df_payload.get("df")
+            cached_year = df_payload.get("year")
+            if cached_year is not None:
+                year = cached_year
+            fetch_error = df_payload.get("error")
+        else:
+            df = df_payload
         if df is None:
-            year = YEAR
-            df = pitching_stats(year, qual=25)
-            if (df is None or len(df) == 0) and date.today().month < 5:
-                year = YEAR - 1
+            try:
                 df = pitching_stats(year, qual=25)
+            except Exception as e:
+                if date.today().month < 5:
+                    year = YEAR - 1
+                    df = pitching_stats(year, qual=25)
+                else:
+                    raise e
             if df is not None and len(df) > 0:
-                _cache_set(df_cache_key, df)
+                _cache_set(df_cache_key, {"df": df, "year": year})
+            else:
+                _cache_set(df_cache_key, {"df": None, "year": year})
+        if fetch_error:
+            result = {"note": "FanGraphs pitching data unavailable", "source_error": fetch_error}
+            _cache_manager.set(cache_key, result, ttl=TTL_FANGRAPHS)
+            return _finish(result, status="error", cache_hit=False)
         if df is None or len(df) == 0:
             result = {"note": "No FanGraphs pitching data available"}
             _cache_manager.set(cache_key, result, ttl=TTL_FANGRAPHS)
-            return result
+            return _finish(result, status="error", cache_hit=False)
 
         # Find the player row by name
         norm = _normalize_name(name)
@@ -1757,7 +1886,7 @@ def _build_batted_ball_profile(name):
         if player_row is None:
             result = {"note": "Player not found in FanGraphs pitching data"}
             _cache_manager.set(cache_key, result, ttl=TTL_FANGRAPHS)
-            return result
+            return _finish(result, status="error", cache_hit=False)
 
         gb_pct = _safe_float(player_row.get("GB%"))
         fb_pct = _safe_float(player_row.get("FB%"))
@@ -1800,16 +1929,20 @@ def _build_batted_ball_profile(name):
             "data_season": year,
         }
         _cache_manager.set(cache_key, result, ttl=TTL_FANGRAPHS)
-        return result
+        return _finish(result, status="ok", cache_hit=False)
     except Exception as e:
-        print("Warning: _build_batted_ball_profile failed for " + str(name) + ": " + str(e))
-        result = {"error": str(e)}
-        _cache_manager.set(cache_key, result, ttl=300)
-        return result
+        err = str(e)
+        print("Warning: _build_batted_ball_profile FanGraphs fetch failed: " + err)
+        # Negative-cache the shared DataFrame fetch error so we don't log once per player.
+        _cache_set(("batted_ball_df", YEAR), {"df": None, "year": year, "error": err})
+        result = {"note": "FanGraphs pitching data unavailable", "source_error": err}
+        _cache_manager.set(cache_key, result, ttl=TTL_FANGRAPHS)
+        return _finish(result, status="error", cache_hit=False)
 
 
 def _build_statcast(name, mlb_id):
     """Build statcast section of player intel"""
+    started = monotonic_ms()
     try:
         player_type = _detect_player_type(name, mlb_id)
         savant_type = player_type
@@ -1972,9 +2105,30 @@ def _build_statcast(name, mlb_id):
         # Save daily snapshot for historical comparison
         _save_statcast_snapshot(name, result)
 
+        log_trace_event(
+            event="intel_stage",
+            stage="intel._build_statcast",
+            duration_ms=max(monotonic_ms() - started, 0),
+            cache_hit=None,
+            status="ok",
+            gate="rankings",
+            player_name=name,
+            player_type=player_type,
+        )
+
         return result
     except Exception as e:
         print("Warning: _build_statcast failed for " + str(name) + ": " + str(e))
+        log_trace_event(
+            event="intel_stage",
+            stage="intel._build_statcast",
+            duration_ms=max(monotonic_ms() - started, 0),
+            cache_hit=None,
+            status="error",
+            gate="rankings",
+            player_name=name,
+            error=str(e),
+        )
         return {"error": str(e)}
 
 
@@ -2359,15 +2513,58 @@ def batch_intel(names, include=None):
     if include is None:
         include = ["statcast"]  # Default to just statcast for batch (efficiency)
 
+    started_total = monotonic_ms()
+    per_player_ms = []
+    sampled_limit = trace_config().get("trace_player_sample", 5)
+
+    def _percentile(values, pct):
+        if not values:
+            return 0
+        ordered = sorted(values)
+        idx = int(round((pct / 100.0) * (len(ordered) - 1)))
+        idx = max(0, min(len(ordered) - 1, idx))
+        return ordered[idx]
+
     result = {}
-    for name in names:
+    for idx, name in enumerate(names):
         if not name:
             continue
+        started_player = monotonic_ms()
+        status = "ok"
         try:
             result[name] = player_intel(name, include=include)
         except Exception as e:
+            status = "error"
             print("Warning: intel failed for " + str(name) + ": " + str(e))
             result[name] = {"name": name, "error": str(e)}
+        elapsed = max(monotonic_ms() - started_player, 0)
+        per_player_ms.append(elapsed)
+        if idx < sampled_limit:
+            log_trace_event(
+                event="batch_intel_player_timing",
+                stage="intel.batch_intel.player",
+                duration_ms=elapsed,
+                cache_hit=None,
+                status=status,
+                gate="rankings",
+                player_name=name,
+                include=include,
+            )
+
+    if per_player_ms:
+        log_trace_event(
+            event="batch_intel_summary",
+            stage="intel.batch_intel",
+            duration_ms=max(monotonic_ms() - started_total, 0),
+            cache_hit=None,
+            status="ok",
+            gate="rankings",
+            include=include,
+            players=len(per_player_ms),
+            p50_ms=_percentile(per_player_ms, 50),
+            p95_ms=_percentile(per_player_ms, 95),
+            max_ms=max(per_player_ms),
+        )
     return result
 
 
