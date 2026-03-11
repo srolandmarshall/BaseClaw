@@ -2577,7 +2577,7 @@ def batch_intel(names, include=None):
         elapsed = max(monotonic_ms() - started_player, 0)
         return idx, name, data, elapsed, status
 
-    max_workers = min(len(names), 15)
+    max_workers = min(len(names), 6)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(_fetch_one, (idx, name)) for idx, name in enumerate(names)]
         for future in as_completed(futures):
