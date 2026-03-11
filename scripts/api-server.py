@@ -189,7 +189,7 @@ _heartbeat_thread.start()
 # --- Startup projection fetch ---
 
 def _startup_projections():
-    """Background thread to ensure projections are loaded on startup"""
+    """Background thread: load projections then pre-warm the rankings cache."""
     import time
     time.sleep(5)  # Let other startup tasks settle
     try:
@@ -197,6 +197,20 @@ def _startup_projections():
         print("Startup projections loaded successfully")
     except Exception as e:
         print("Startup projections failed: " + str(e))
+        return
+
+    # Pre-warm rankings cache so the first user request is a cache hit
+    try:
+        print("Warming rankings cache (count=" + str(_RANKINGS_WARMUP_COUNT) + ")...")
+        b_result = valuations.cmd_rankings(["B", str(_RANKINGS_WARMUP_COUNT)], as_json=True)
+        p_result = valuations.cmd_rankings(["P", str(_RANKINGS_WARMUP_COUNT)], as_json=True)
+        from position_batching import normalize_hitter_payload, ranking_position_tokens, grouped_all_payload
+        b_norm = normalize_hitter_payload(b_result, "players", _RANKINGS_WARMUP_POSITIONS, True, ranking_position_tokens)
+        all_result = grouped_all_payload(b_norm, p_result)
+        _set_cached_rankings("ALL", _RANKINGS_WARMUP_COUNT, True, _RANKINGS_WARMUP_POSITIONS, all_result)
+        print("Rankings cache warmed (" + str(len(b_result.get("players", []))) + " batters, " + str(len(p_result.get("players", []))) + " pitchers)")
+    except Exception as e:
+        print("Rankings warmup failed: " + str(e))
 
 
 _proj_thread = threading.Thread(target=_startup_projections, daemon=True)
@@ -206,27 +220,53 @@ _proj_thread.start()
 # --- Rankings response cache ---
 
 _RANKINGS_CACHE_TTL = int(os.environ.get("RANKINGS_CACHE_TTL_SECONDS", "600"))  # 10 min default
-_rankings_cache = {}          # key -> (expires_at, result_dict)
+_RANKINGS_WARMUP_COUNT = int(os.environ.get("RANKINGS_WARMUP_COUNT", "150"))
+_RANKINGS_WARMUP_POSITIONS = ["C", "1B", "2B", "3B", "SS", "OF", "UTIL"]
+_rankings_cache = {}          # (pos_type, group_by_position, positions) -> (expires_at, count, result_dict)
 _rankings_cache_lock = threading.Lock()
 
 
-def _rankings_cache_key(pos_type, count, group_by_position, positions):
-    return (pos_type, str(count), bool(group_by_position), tuple(sorted(positions or [])))
+def _rankings_base_key(pos_type, group_by_position, positions):
+    """Cache key ignoring count — we store the largest result and slice on read."""
+    return (pos_type, bool(group_by_position), tuple(sorted(positions or [])))
 
 
-def _get_cached_rankings(key):
+def _slice_rankings_result(result, requested_count):
+    """Return a copy of result trimmed to requested_count players per group."""
+    n = int(requested_count)
+    if result.get("pos_type") == "ALL":
+        sliced = dict(result)
+        sliced["groups"] = {}
+        for grp_key, grp in result.get("groups", {}).items():
+            g = dict(grp)
+            g["players"] = (g.get("players") or [])[:n]
+            sliced["groups"][grp_key] = g
+        return sliced
+    r = dict(result)
+    r["players"] = (r.get("players") or [])[:n]
+    return r
+
+
+def _get_cached_rankings(pos_type, count, group_by_position, positions):
     import time
+    key = _rankings_base_key(pos_type, group_by_position, positions)
     with _rankings_cache_lock:
         entry = _rankings_cache.get(key)
         if entry and time.monotonic() < entry[0]:
-            return entry[1]
+            cached_count, cached_result = entry[1], entry[2]
+            if cached_count >= int(count):
+                return _slice_rankings_result(cached_result, count)
         return None
 
 
-def _set_cached_rankings(key, result):
+def _set_cached_rankings(pos_type, count, group_by_position, positions, result):
     import time
+    key = _rankings_base_key(pos_type, group_by_position, positions)
     with _rankings_cache_lock:
-        _rankings_cache[key] = (time.monotonic() + _RANKINGS_CACHE_TTL, result)
+        existing = _rankings_cache.get(key)
+        # Only overwrite if new result has more players (or cache is empty/expired)
+        if existing is None or time.monotonic() >= existing[0] or int(count) >= existing[1]:
+            _rankings_cache[key] = (time.monotonic() + _RANKINGS_CACHE_TTL, int(count), result)
 
 
 # --- Health check ---
@@ -614,8 +654,7 @@ def api_rankings():
         )
         update_trace_context(pos_type=pos_type, count=_safe_int(count, None))
 
-        cache_key = _rankings_cache_key(pos_type, count, group_by_position, positions)
-        cached = _get_cached_rankings(cache_key)
+        cached = _get_cached_rankings(pos_type, count, group_by_position, positions)
         if cached is not None:
             log_trace_event(event="rankings_cache_hit", stage="api_rankings", duration_ms=0, cache_hit=True, status="ok", gate="rankings")
             return jsonify(cached)
@@ -649,7 +688,7 @@ def api_rankings():
                 )
 
         response = _timed_stage("serialization", lambda: jsonify(result))
-        _set_cached_rankings(cache_key, result)
+        _set_cached_rankings(pos_type, count, group_by_position, positions, result)
         return response
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
