@@ -180,7 +180,7 @@ def _run_heartbeat():
 
 
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 
 _heartbeat_thread = threading.Thread(target=_run_heartbeat, daemon=True)
 _heartbeat_thread.start()
@@ -498,6 +498,7 @@ def api_draft_cheatsheet():
 
 @app.route("/api/best-available")
 def api_best_available():
+    _TIMEOUT = int(os.environ.get("BEST_AVAILABLE_TIMEOUT_SECONDS", "30"))
     try:
         pos_type = request.args.get("pos_type", "B").upper()
         count = request.args.get("count", "25")
@@ -505,28 +506,39 @@ def api_best_available():
         group_by_position = _safe_bool(request.args.get("group_by_position", "false"))
         positions = _parse_hitter_positions_csv(request.args.get("positions", ""))
 
-        if pos_type == "ALL":
-            hitters = draft_assistant.cmd_best_available(["B", count, include_intel], as_json=True)
-            pitchers = draft_assistant.cmd_best_available(["P", count, include_intel], as_json=True)
-            hitters = _normalize_hitter_payload(
-                hitters,
-                "players",
-                positions,
-                group_by_position,
-                _best_available_position_tokens,
-            )
-            result = _grouped_all_payload(hitters, pitchers)
-        else:
-            result = draft_assistant.cmd_best_available([pos_type, count, include_intel], as_json=True)
-            if pos_type == "B":
-                result = _normalize_hitter_payload(
-                    result,
+        def _fetch_best_available():
+            if pos_type == "ALL":
+                hitters = draft_assistant.cmd_best_available(["B", count, include_intel], as_json=True)
+                pitchers = draft_assistant.cmd_best_available(["P", count, include_intel], as_json=True)
+                hitters = _normalize_hitter_payload(
+                    hitters,
                     "players",
                     positions,
                     group_by_position,
                     _best_available_position_tokens,
                 )
-        return jsonify(result)
+                return _grouped_all_payload(hitters, pitchers)
+            else:
+                result = draft_assistant.cmd_best_available([pos_type, count, include_intel], as_json=True)
+                if pos_type == "B":
+                    result = _normalize_hitter_payload(
+                        result,
+                        "players",
+                        positions,
+                        group_by_position,
+                        _best_available_position_tokens,
+                    )
+                return result
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_fetch_best_available)
+            done, _ = wait([future], timeout=_TIMEOUT)
+            if not done:
+                empty_b = {"pos_type": "B", "players": []}
+                empty_p = {"pos_type": "P", "players": []}
+                fallback = _grouped_all_payload(empty_b, empty_p) if pos_type == "ALL" else {"pos_type": pos_type, "players": []}
+                return jsonify(fallback)
+            return jsonify(future.result())
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
