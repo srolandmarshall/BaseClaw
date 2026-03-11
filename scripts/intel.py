@@ -20,6 +20,7 @@ import io
 import threading
 import urllib.request
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -2547,7 +2548,6 @@ def batch_intel(names, include=None):
         include = ["statcast"]  # Default to just statcast for batch (efficiency)
 
     started_total = monotonic_ms()
-    per_player_ms = []
     sampled_limit = trace_config().get("trace_player_sample", 5)
 
     def _percentile(values, pct):
@@ -2559,30 +2559,45 @@ def batch_intel(names, include=None):
         return ordered[idx]
 
     result = {}
-    for idx, name in enumerate(names):
+    per_player_ms = []
+    per_player_ms_lock = threading.Lock()
+
+    def _fetch_one(idx_name):
+        idx, name = idx_name
         if not name:
-            continue
+            return idx, name, None, 0, "skip"
         started_player = monotonic_ms()
         status = "ok"
         try:
-            result[name] = player_intel(name, include=include)
+            data = player_intel(name, include=include)
         except Exception as e:
             status = "error"
             print("Warning: intel failed for " + str(name) + ": " + str(e))
-            result[name] = {"name": name, "error": str(e)}
+            data = {"name": name, "error": str(e)}
         elapsed = max(monotonic_ms() - started_player, 0)
-        per_player_ms.append(elapsed)
-        if idx < sampled_limit:
-            log_trace_event(
-                event="batch_intel_player_timing",
-                stage="intel.batch_intel.player",
-                duration_ms=elapsed,
-                cache_hit=None,
-                status=status,
-                gate="rankings",
-                player_name=name,
-                include=include,
-            )
+        return idx, name, data, elapsed, status
+
+    max_workers = min(len(names), 15)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_fetch_one, (idx, name)) for idx, name in enumerate(names)]
+        for future in as_completed(futures):
+            idx, name, data, elapsed, status = future.result()
+            if status == "skip":
+                continue
+            result[name] = data
+            with per_player_ms_lock:
+                per_player_ms.append(elapsed)
+            if idx < sampled_limit:
+                log_trace_event(
+                    event="batch_intel_player_timing",
+                    stage="intel.batch_intel.player",
+                    duration_ms=elapsed,
+                    cache_hit=None,
+                    status=status,
+                    gate="rankings",
+                    player_name=name,
+                    include=include,
+                )
 
     if per_player_ms:
         log_trace_event(
