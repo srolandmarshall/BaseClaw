@@ -33,13 +33,21 @@ def _proj_csv_path(stats_type, proj_type=None):
 
 
 def _proj_csv_is_fresh(path):
-    """Check if a projection CSV exists and is less than 24h old"""
+    """Check if a projection CSV exists, is less than 24h old, and has a Pos column (batters)."""
     if not os.path.exists(path):
         return False
     try:
         import time as _time
         age = _time.time() - os.path.getmtime(path)
-        return age < PROJ_MAX_AGE
+        if age >= PROJ_MAX_AGE:
+            return False
+        # Invalidate hitter CSVs that are missing the Pos column
+        if "hitter" in path:
+            with open(path) as _f:
+                header = _f.readline()
+            if "Pos" not in header:
+                return False
+        return True
     except Exception:
         return True
 
@@ -89,6 +97,7 @@ def fetch_fangraphs_projections(stats_type, proj_type="steamer"):
                 row["SLG"] = entry.get("SLG", 0)
                 row["2B"] = entry.get("2B", 0)
                 row["3B"] = entry.get("3B", 0)
+                row["Pos"] = entry.get("minpos", "") or entry.get("Pos", "")
             else:
                 row["IP"] = entry.get("IP", 0)
                 row["W"] = entry.get("W", 0)
@@ -215,6 +224,16 @@ def fetch_consensus_projections(stats_type):
         blended = {}
         blended["Name"] = template.get("Name", "")
         blended["Team"] = template.get("Team", "")
+
+        # Carry forward non-numeric fields from the highest-weight system that has them
+        if stats_type == "bat":
+            for row, _w in rows_and_weights:
+                pos_val = str(row.get("Pos", "") or "").strip()
+                if pos_val:
+                    blended["Pos"] = pos_val
+                    break
+            else:
+                blended["Pos"] = ""
 
         # Numeric columns to blend
         if stats_type == "bat":
