@@ -180,6 +180,7 @@ def _run_heartbeat():
 
 
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 _heartbeat_thread = threading.Thread(target=_run_heartbeat, daemon=True)
 _heartbeat_thread.start()
@@ -573,11 +574,11 @@ def api_rankings():
         update_trace_context(pos_type=pos_type, count=_safe_int(count, None))
 
         if pos_type == "ALL":
-            hitters = _timed_stage(
-                "cmd_rankings",
-                lambda: valuations.cmd_rankings(["B", count], as_json=True),
-            )
-            pitchers = valuations.cmd_rankings(["P", count], as_json=True)
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                hitters_future = pool.submit(valuations.cmd_rankings, ["B", count], True)
+                pitchers_future = pool.submit(valuations.cmd_rankings, ["P", count], True)
+                hitters = hitters_future.result()
+                pitchers = pitchers_future.result()
             hitters = _normalize_hitter_payload(
                 hitters,
                 "players",
