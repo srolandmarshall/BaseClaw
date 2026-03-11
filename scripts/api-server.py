@@ -203,6 +203,32 @@ _proj_thread = threading.Thread(target=_startup_projections, daemon=True)
 _proj_thread.start()
 
 
+# --- Rankings response cache ---
+
+_RANKINGS_CACHE_TTL = int(os.environ.get("RANKINGS_CACHE_TTL_SECONDS", "600"))  # 10 min default
+_rankings_cache = {}          # key -> (expires_at, result_dict)
+_rankings_cache_lock = threading.Lock()
+
+
+def _rankings_cache_key(pos_type, count, group_by_position, positions):
+    return (pos_type, str(count), bool(group_by_position), tuple(sorted(positions or [])))
+
+
+def _get_cached_rankings(key):
+    import time
+    with _rankings_cache_lock:
+        entry = _rankings_cache.get(key)
+        if entry and time.monotonic() < entry[0]:
+            return entry[1]
+        return None
+
+
+def _set_cached_rankings(key, result):
+    import time
+    with _rankings_cache_lock:
+        _rankings_cache[key] = (time.monotonic() + _RANKINGS_CACHE_TTL, result)
+
+
 # --- Health check ---
 
 
@@ -588,6 +614,12 @@ def api_rankings():
         )
         update_trace_context(pos_type=pos_type, count=_safe_int(count, None))
 
+        cache_key = _rankings_cache_key(pos_type, count, group_by_position, positions)
+        cached = _get_cached_rankings(cache_key)
+        if cached is not None:
+            log_trace_event(event="rankings_cache_hit", stage="api_rankings", duration_ms=0, cache_hit=True, status="ok", gate="rankings")
+            return jsonify(cached)
+
         if pos_type == "ALL":
             with ThreadPoolExecutor(max_workers=2) as pool:
                 hitters_future = pool.submit(valuations.cmd_rankings, ["B", count], True)
@@ -617,6 +649,7 @@ def api_rankings():
                 )
 
         response = _timed_stage("serialization", lambda: jsonify(result))
+        _set_cached_rankings(cache_key, result)
         return response
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
