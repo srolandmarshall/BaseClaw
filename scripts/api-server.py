@@ -530,7 +530,8 @@ def api_best_available():
                     )
                 return result
 
-        with ThreadPoolExecutor(max_workers=1) as pool:
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
             future = pool.submit(_fetch_best_available)
             done, _ = wait([future], timeout=_TIMEOUT)
             if not done:
@@ -539,6 +540,8 @@ def api_best_available():
                 fallback = _grouped_all_payload(empty_b, empty_p) if pos_type == "ALL" else {"pos_type": pos_type, "players": []}
                 return jsonify(fallback)
             return jsonify(future.result())
+        finally:
+            pool.shutdown(wait=False)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
