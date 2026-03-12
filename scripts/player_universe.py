@@ -30,7 +30,12 @@ def _source_priority(tags):
 
 def _infer_pos_type(eligible_positions):
     tokens = [str(pos or "").strip().upper() for pos in (eligible_positions or [])]
-    if any(pos in {"SP", "RP", "P"} for pos in tokens):
+    pitcher_pos = {"SP", "RP", "P"}
+    batter_pos = {"C", "1B", "2B", "3B", "SS", "OF", "LF", "CF", "RF", "DH"}
+    pitcher_count = sum(1 for p in tokens if p in pitcher_pos)
+    batter_count = sum(1 for p in tokens if p in batter_pos)
+    # Two-way players: classify by majority; tie goes to batter
+    if pitcher_count > batter_count:
         return "P"
     return "B"
 

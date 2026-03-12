@@ -1512,16 +1512,23 @@ def cmd_rankings(args, as_json=False):
             lambda: pitchers.sort_values("Z_Final", ascending=False).head(count),
         )
 
+    _PITCHER_POSITIONS = {"SP", "RP", "P"}
+
     if as_json:
         def _serialize_players():
             out = []
             for i, (_, row) in enumerate(df.iterrows(), 1):
                 z = _safe_float(row.get("Z_Final", 0))
+                raw_pos = str(row.get("Pos", "")).strip().upper()
+                # Two-way players (e.g. Ohtani) appear in bat projections with
+                # pitcher minpos (SP). Normalise to DH for the batter ranking.
+                if pos_type == "B" and raw_pos in _PITCHER_POSITIONS:
+                    raw_pos = "DH"
                 entry = {
                     "rank": i,
                     "name": str(row.get("Name", "?")),
                     "team": str(row.get("Team", "")),
-                    "pos": str(row.get("Pos", "")),
+                    "pos": raw_pos,
                     "z_score": round(z, 2),
                     "mlb_id": get_mlb_id(str(row.get("Name", ""))),
                 }
