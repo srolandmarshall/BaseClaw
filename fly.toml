@@ -11,6 +11,8 @@ primary_region = 'iad'
   ENABLE_WRITE_OPS = 'true'
   MCP_SERVER_URL = 'https://baseclaw-mcp.fly.dev'
   PORT = '4951'
+  AWS_REGION = 'us-east-1'
+  S3_BUCKET = 'baseclaw-cache-prod'
 
 [http_service]
   internal_port = 4951

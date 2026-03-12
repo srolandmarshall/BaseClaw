@@ -30,6 +30,7 @@ import sqlite3
 from shared import MLB_API, mlb_fetch as _mlb_fetch, USER_AGENT, DATA_DIR, reddit_get
 from shared import normalize_player_name as _normalize_name
 from trace_utils import log_trace_event, monotonic_ms, trace_config
+from s3_cache import s3_cache as _s3_cache
 
 # Current year for all API calls
 YEAR = date.today().year
@@ -199,14 +200,48 @@ def _save_statcast_snapshot(name, statcast_data):
 # 2. Baseball Savant CSV Fetchers
 # ============================================================
 
+def _savant_s3_key(url: str) -> str:
+    """Derive a stable daily S3 key for a Savant leaderboard URL."""
+    today = date.today().strftime("%Y-%m-%d")
+    # Extract meaningful slug from URL path
+    import urllib.parse as _up
+    parsed = _up.urlparse(url)
+    slug = parsed.path.strip("/").replace("/", "_")
+    params = _up.parse_qs(parsed.query)
+    ptype = (params.get("type") or ["all"])[0]
+    year = (params.get("year") or ["0"])[0]
+    return f"savant/{today}/{slug}_{ptype}_{year}.csv"
+
+
 def _fetch_csv(url):
-    """Fetch a CSV from a URL and return list of dicts"""
+    """Fetch a CSV from a URL and return list of dicts.
+    Checks S3 cache before hitting the network (Savant URLs only).
+    """
+    is_savant = "baseballsavant.mlb.com" in url
+    s3_key = _savant_s3_key(url) if is_savant else None
+
+    # L2: S3 cache
+    if s3_key:
+        cached_bytes = _s3_cache.get(s3_key)
+        if cached_bytes:
+            try:
+                reader = csv.DictReader(io.StringIO(cached_bytes.decode("utf-8-sig")))
+                rows = list(reader)
+                if rows:
+                    return rows
+            except Exception:
+                pass
+
     try:
         req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(req, timeout=30) as response:
             raw = response.read().decode("utf-8-sig")
         reader = csv.DictReader(io.StringIO(raw))
-        return list(reader)
+        rows = list(reader)
+        # Upload to S3 so other machines / future cold starts skip the download
+        if s3_key and rows:
+            _s3_cache.put(s3_key, raw.encode("utf-8"), ttl_seconds=TTL_SAVANT)
+        return rows
     except Exception as e:
         print("Warning: CSV fetch failed for " + url + ": " + str(e))
         return []
