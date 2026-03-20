@@ -1439,7 +1439,7 @@ def _safe_float(val):
 
 # --- CLI Commands ---
 
-def cmd_rankings(args, as_json=False):
+def cmd_rankings(args, as_json=False, enrich=True):
     """Show top N players by z-score value"""
     def _timed_cmd_stage(stage_name, fn):
         started = monotonic_ms()
@@ -1539,7 +1539,8 @@ def cmd_rankings(args, as_json=False):
             return out
 
         players = _timed_cmd_stage("player_serialization", _serialize_players)
-        _timed_cmd_stage("enrich_with_intel", lambda: enrich_with_intel(players))
+        if enrich:
+            _timed_cmd_stage("enrich_with_intel", lambda: enrich_with_intel(players))
         log_trace_event(
             event="valuation_cmd_rankings_summary",
             stage="cmd_rankings",

@@ -189,7 +189,12 @@ _heartbeat_thread.start()
 # --- Startup projection fetch ---
 
 def _startup_projections():
-    """Background thread: load projections then pre-warm the rankings cache."""
+    """Background thread: load projections then pre-warm the rankings cache.
+
+    Warms two cache buckets:
+    - enrich=False, count=DRAFT_POOL_COUNT (200+ batters, 150+ pitchers) — for draft tools
+    - enrich=True,  count=RANKINGS_WARMUP_COUNT (~150) — for research runs / chat
+    """
     import time
     time.sleep(5)  # Let other startup tasks settle
     try:
@@ -199,18 +204,32 @@ def _startup_projections():
         print("Startup projections failed: " + str(e))
         return
 
-    # Pre-warm rankings cache so the first user request is a cache hit
+    # 1. Warm bare (no intel) pool — large count, fast, covers full draft pool
     try:
-        print("Warming rankings cache (count=" + str(_RANKINGS_WARMUP_COUNT) + ")...")
-        b_result = valuations.cmd_rankings(["B", str(_RANKINGS_WARMUP_COUNT)], as_json=True)
-        p_result = valuations.cmd_rankings(["P", str(_RANKINGS_WARMUP_COUNT)], as_json=True)
+        draft_count = str(int(os.environ.get("DRAFT_POOL_COUNT", "250")))
+        print("Warming bare rankings cache (count=" + draft_count + ", enrich=False)...")
+        b_bare = valuations.cmd_rankings(["B", draft_count], as_json=True, enrich=False)
+        p_bare = valuations.cmd_rankings(["P", draft_count], as_json=True, enrich=False)
+        _set_cached_rankings("B", draft_count, False, [], b_bare, enrich=False)
+        _set_cached_rankings("P", draft_count, False, [], p_bare, enrich=False)
+        print("Bare rankings cached (" + str(len(b_bare.get("players", []))) + "B / " + str(len(p_bare.get("players", []))) + "P)")
+    except Exception as e:
+        print("Bare rankings warmup failed: " + str(e))
+
+    # 2. Warm enriched pool — smaller count, includes statcast intel
+    try:
+        print("Warming enriched rankings cache (count=" + str(_RANKINGS_WARMUP_COUNT) + ", enrich=True)...")
+        b_result = valuations.cmd_rankings(["B", str(_RANKINGS_WARMUP_COUNT)], as_json=True, enrich=True)
+        p_result = valuations.cmd_rankings(["P", str(_RANKINGS_WARMUP_COUNT)], as_json=True, enrich=True)
         from position_batching import normalize_hitter_payload, ranking_position_tokens, grouped_all_payload
         b_norm = normalize_hitter_payload(b_result, "players", _RANKINGS_WARMUP_POSITIONS, True, ranking_position_tokens)
         all_result = grouped_all_payload(b_norm, p_result)
-        _set_cached_rankings("ALL", _RANKINGS_WARMUP_COUNT, True, _RANKINGS_WARMUP_POSITIONS, all_result)
-        print("Rankings cache warmed (" + str(len(b_result.get("players", []))) + " batters, " + str(len(p_result.get("players", []))) + " pitchers)")
+        _set_cached_rankings("ALL", _RANKINGS_WARMUP_COUNT, True, _RANKINGS_WARMUP_POSITIONS, all_result, enrich=True)
+        _set_cached_rankings("B", _RANKINGS_WARMUP_COUNT, False, [], b_result, enrich=True)
+        _set_cached_rankings("P", _RANKINGS_WARMUP_COUNT, False, [], p_result, enrich=True)
+        print("Enriched rankings cached (" + str(len(b_result.get("players", []))) + "B / " + str(len(p_result.get("players", []))) + "P)")
     except Exception as e:
-        print("Rankings warmup failed: " + str(e))
+        print("Enriched rankings warmup failed: " + str(e))
 
 
 _proj_thread = threading.Thread(target=_startup_projections, daemon=True)
@@ -222,13 +241,13 @@ _proj_thread.start()
 _RANKINGS_CACHE_TTL = int(os.environ.get("RANKINGS_CACHE_TTL_SECONDS", "600"))  # 10 min default
 _RANKINGS_WARMUP_COUNT = int(os.environ.get("RANKINGS_WARMUP_COUNT", "150"))
 _RANKINGS_WARMUP_POSITIONS = ["C", "1B", "2B", "3B", "SS", "OF", "UTIL"]
-_rankings_cache = {}          # (pos_type, group_by_position, positions) -> (expires_at, count, result_dict)
+_rankings_cache = {}          # (pos_type, group_by_position, positions, enrich) -> (expires_at, count, result_dict)
 _rankings_cache_lock = threading.Lock()
 
 
-def _rankings_base_key(pos_type, group_by_position, positions):
-    """Cache key ignoring count — we store the largest result and slice on read."""
-    return (pos_type, bool(group_by_position), tuple(sorted(positions or [])))
+def _rankings_base_key(pos_type, group_by_position, positions, enrich=True):
+    """Cache key — separate buckets for enriched vs bare rankings."""
+    return (pos_type, bool(group_by_position), tuple(sorted(positions or [])), bool(enrich))
 
 
 def _slice_rankings_result(result, requested_count):
@@ -247,9 +266,9 @@ def _slice_rankings_result(result, requested_count):
     return r
 
 
-def _get_cached_rankings(pos_type, count, group_by_position, positions):
+def _get_cached_rankings(pos_type, count, group_by_position, positions, enrich=True):
     import time
-    key = _rankings_base_key(pos_type, group_by_position, positions)
+    key = _rankings_base_key(pos_type, group_by_position, positions, enrich)
     with _rankings_cache_lock:
         entry = _rankings_cache.get(key)
         if entry and time.monotonic() < entry[0]:
@@ -259,14 +278,15 @@ def _get_cached_rankings(pos_type, count, group_by_position, positions):
         return None
 
 
-def _set_cached_rankings(pos_type, count, group_by_position, positions, result):
+def _set_cached_rankings(pos_type, count, group_by_position, positions, result, enrich=True):
     import time
-    key = _rankings_base_key(pos_type, group_by_position, positions)
+    key = _rankings_base_key(pos_type, group_by_position, positions, enrich)
     with _rankings_cache_lock:
         existing = _rankings_cache.get(key)
         # Only overwrite if new result has more players (or cache is empty/expired)
         if existing is None or time.monotonic() >= existing[0] or int(count) >= existing[1]:
             _rankings_cache[key] = (time.monotonic() + _RANKINGS_CACHE_TTL, int(count), result)
+
 
 
 # --- Health check ---
@@ -643,26 +663,27 @@ def api_rankings():
             )
 
     try:
-        pos_type, count, group_by_position, positions = _timed_stage(
+        pos_type, count, group_by_position, positions, enrich = _timed_stage(
             "arg_parse",
             lambda: (
                 request.args.get("pos_type", "B").upper(),
                 request.args.get("count", "25"),
                 _safe_bool(request.args.get("group_by_position", "false")),
                 _parse_hitter_positions_csv(request.args.get("positions", "")),
+                _safe_bool(request.args.get("enrich", "true")),
             ),
         )
         update_trace_context(pos_type=pos_type, count=_safe_int(count, None))
 
-        cached = _get_cached_rankings(pos_type, count, group_by_position, positions)
+        cached = _get_cached_rankings(pos_type, count, group_by_position, positions, enrich)
         if cached is not None:
             log_trace_event(event="rankings_cache_hit", stage="api_rankings", duration_ms=0, cache_hit=True, status="ok", gate="rankings")
             return jsonify(cached)
 
         if pos_type == "ALL":
             with ThreadPoolExecutor(max_workers=2) as pool:
-                hitters_future = pool.submit(valuations.cmd_rankings, ["B", count], True)
-                pitchers_future = pool.submit(valuations.cmd_rankings, ["P", count], True)
+                hitters_future = pool.submit(valuations.cmd_rankings, ["B", count], True, enrich)
+                pitchers_future = pool.submit(valuations.cmd_rankings, ["P", count], True, enrich)
                 hitters = hitters_future.result()
                 pitchers = pitchers_future.result()
             hitters = _normalize_hitter_payload(
@@ -676,7 +697,7 @@ def api_rankings():
         else:
             result = _timed_stage(
                 "cmd_rankings",
-                lambda: valuations.cmd_rankings([pos_type, count], as_json=True),
+                lambda: valuations.cmd_rankings([pos_type, count], as_json=True, enrich=enrich),
             )
             if pos_type == "B":
                 result = _normalize_hitter_payload(
@@ -688,7 +709,7 @@ def api_rankings():
                 )
 
         response = _timed_stage("serialization", lambda: jsonify(result))
-        _set_cached_rankings(pos_type, count, group_by_position, positions, result)
+        _set_cached_rankings(pos_type, count, group_by_position, positions, result, enrich)
         return response
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
