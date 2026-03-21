@@ -12,6 +12,7 @@ import {
   type DraftRecommendation,
   type CheatsheetResponse,
   type BestAvailableResponse,
+  type DraftSimResponse,
 } from "../api/types.js";
 
 const DRAFT_URI = "ui://baseclaw/draft.html";
@@ -202,6 +203,68 @@ export function registerDraftTools(server: McpServer, distDir: string) {
         return {
           content: [{ type: "text" as const, text }],
           structuredContent: { type: "draft-board", ai_recommendation: null, ...data },
+        };
+      } catch (e) { return toolError(e); }
+    },
+  );
+
+  // yahoo_draft_sim
+  registerAppTool(
+    server,
+    "yahoo_draft_sim",
+    {
+      description: "Simulate a snake draft and get per-pick player recommendations with position scarcity analysis. Shows top options at each of your picks plus a projected end-state roster.",
+      inputSchema: {
+        draft_position: z.number().int().min(1).describe("Your pick slot (1-indexed)").default(1),
+        num_teams: z.number().int().min(2).max(20).describe("Number of teams in the league").default(12),
+        rounds: z.number().int().min(1).max(30).describe("Number of rounds (roster size)").default(23),
+        noise: z.number().int().min(0).max(10).describe("Opponent ADP variance (0=perfect ADP, higher=more random)").default(3),
+      },
+      annotations: { readOnlyHint: true },
+      _meta: { ui: { resourceUri: DRAFT_URI } },
+    },
+    async ({ draft_position, num_teams, rounds, noise }) => {
+      try {
+        const data = await apiGet<DraftSimResponse>("/api/draft-sim", {
+          draft_position: String(draft_position),
+          num_teams: String(num_teams),
+          rounds: String(rounds),
+          noise: String(noise),
+        });
+
+        const lines: string[] = [];
+        lines.push(
+          "## Draft Simulation — Pick " + draft_position + " of " + num_teams,
+          "Pool: " + data.meta.batters_in_pool + " batters / " + data.meta.pitchers_in_pool + " pitchers | Rounds: " + rounds,
+          "",
+        );
+
+        lines.push("### Your Picks");
+        for (const pick of data.user_picks) {
+          const top = pick.top_options[0];
+          const others = pick.top_options.slice(1, 4).map((o) => o.name + " (" + o.pos + ")").join(", ");
+          const scarcity = pick.scarcity_flags.length > 0 ? " ⚠ " + pick.scarcity_flags[0] : "";
+          lines.push(
+            "  R" + pick.round + " (pick #" + pick.overall_pick + ")" + scarcity,
+            "    → " + top.name + " | " + top.pos + " | z=" + top.z_score.toFixed(2) + " | " + top.position_tier + (top.scarcity_note ? " | " + top.scarcity_note : ""),
+            "    Alt: " + (others || "none"),
+          );
+        }
+
+        lines.push("", "### Position Scarcity (elite tier exhausted at overall pick #)");
+        const timelineEntries = Object.entries(data.scarcity_timeline).sort((a, b) => a[1] - b[1]);
+        for (const [pos, pickNum] of timelineEntries) {
+          lines.push("  " + pos.padEnd(4) + " → pick #" + pickNum);
+        }
+
+        lines.push("", "### Projected Roster");
+        for (const p of data.roster_projection) {
+          lines.push("  R" + p.round + " " + p.name + " (" + p.pos + ") z=" + p.z_score.toFixed(2));
+        }
+
+        return {
+          content: [{ type: "text" as const, text: lines.join("\n") }],
+          structuredContent: { type: "draft-sim", ...data },
         };
       } catch (e) { return toolError(e); }
     },

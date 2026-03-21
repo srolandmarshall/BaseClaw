@@ -40,6 +40,7 @@ import intel
 import news
 import yahoo_browser
 import player_universe
+import draft_sim
 
 app = Flask(__name__)
 
@@ -628,6 +629,64 @@ def api_best_available():
             return jsonify(future.result())
         finally:
             pool.shutdown(wait=False)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# --- Valuations (valuations.py) ---
+# TS tools call: /api/rankings, /api/compare, /api/value
+
+
+# --- Draft Sim (draft_sim.py) ---
+
+@app.route("/api/draft-sim")
+def api_draft_sim():
+    """
+    Run a snake draft simulation and return per-pick recommendations.
+
+    Query params:
+      draft_position  int  required  your pick slot (1-indexed)
+      num_teams       int  optional  default 12
+      rounds          int  optional  default 23
+      noise           int  optional  default 3  (ADP variance per opponent pick)
+      seed            int  optional  default 42
+    """
+    try:
+        draft_position = int(request.args.get("draft_position", 3))
+        num_teams = int(request.args.get("num_teams", 12))
+        rounds = int(request.args.get("rounds", 23))
+        noise = int(request.args.get("noise", 3))
+        seed = int(request.args.get("seed", 42))
+
+        if not (1 <= draft_position <= num_teams):
+            return jsonify({"error": "draft_position must be between 1 and num_teams"}), 400
+
+        # Use the pre-warmed bare rankings pool (enrich=False, count=250+)
+        draft_count = str(int(os.environ.get("DRAFT_POOL_COUNT", "250")))
+        b_cached = _get_cached_rankings("B", int(draft_count), False, [], enrich=False)
+        p_cached = _get_cached_rankings("P", int(draft_count), False, [], enrich=False)
+
+        # Fall back to live fetch if cache is cold
+        if b_cached is None:
+            b_cached = valuations.cmd_rankings(["B", draft_count], as_json=True, enrich=False)
+        if p_cached is None:
+            p_cached = valuations.cmd_rankings(["P", draft_count], as_json=True, enrich=False)
+
+        batters = b_cached.get("players", []) if isinstance(b_cached, dict) else []
+        pitchers = p_cached.get("players", []) if isinstance(p_cached, dict) else []
+
+        result = draft_sim.simulate_draft(
+            batters=batters,
+            pitchers=pitchers,
+            draft_position=draft_position,
+            num_teams=num_teams,
+            rounds=rounds,
+            noise=noise,
+            seed=seed,
+        )
+        return jsonify(result)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:

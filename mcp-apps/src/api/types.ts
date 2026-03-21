@@ -1748,3 +1748,49 @@ export interface SeasonCheckpointResponse {
   trade_finder: TradeFinderResponse | { _error?: string };
 }
 
+
+export interface DraftSimOption {
+  name: string;
+  team: string;
+  pos: string;
+  pos_type: string;
+  z_score: number;
+  adp_rank: number;
+  position_tier: string;
+  scarcity_note: string;
+  suggested: boolean;
+}
+
+export interface DraftSimUserPick {
+  round: number;
+  overall_pick: number;
+  top_options: DraftSimOption[];
+  scarcity_flags: string[];
+  position_needs: string[];
+}
+
+export interface DraftSimRosterEntry {
+  pick_num: number;
+  round: number | null;
+  overall_pick: number | null;
+  name: string;
+  pos: string;
+  pos_type: string;
+  z_score: number;
+}
+
+export interface DraftSimResponse {
+  user_picks: DraftSimUserPick[];
+  roster_projection: DraftSimRosterEntry[];
+  scarcity_timeline: Record<string, number>;
+  position_targets: Array<{ round: number; overall_pick: number; suggested_position: string }>;
+  meta: {
+    draft_position: number;
+    num_teams: number;
+    rounds: number;
+    noise: number;
+    total_picks_simulated: number;
+    batters_in_pool: number;
+    pitchers_in_pool: number;
+  };
+}
