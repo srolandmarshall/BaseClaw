@@ -7,6 +7,7 @@ Routes match the TypeScript MCP Apps server's python-client.ts expectations.
 import sys
 import os
 import importlib
+from mlb_id_cache import get_mlb_id
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -52,6 +53,189 @@ def _safe_int(value, default=None):
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _safe_float(value, default=0.0):
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_positions(value):
+    if isinstance(value, list):
+        return [str(v) for v in value if str(v)]
+    if isinstance(value, str):
+        return [value] if value else []
+    return []
+
+
+def _player_team_abbr(player):
+    if not isinstance(player, dict):
+        return ""
+    for key in ("editorial_team_abbr", "team_abbr", "team"):
+        value = player.get(key, "")
+        if isinstance(value, str) and value:
+            return value
+        if isinstance(value, dict):
+            for subkey in ("abbr", "abbreviation", "shortName", "name"):
+                subval = value.get(subkey, "")
+                if subval:
+                    return str(subval)
+    return ""
+
+
+def _recent_stat(game, *keys):
+    for key in keys:
+        if key in game and game.get(key) not in (None, ""):
+            return _safe_float(game.get(key), 0.0)
+    return 0.0
+
+
+def _format_number(value):
+    if abs(value - round(value)) < 1e-9:
+        return str(int(round(value)))
+    return ("%.1f" % value).rstrip("0").rstrip(".")
+
+
+def _score_hot_bat(player):
+    mlb_id = player.get("mlb_id") or get_mlb_id(player.get("name", ""))
+    if not mlb_id:
+        return None
+    games = intel._fetch_mlb_game_log(mlb_id, "hitting", 7)
+    if not games:
+        return None
+
+    hits = sum(_recent_stat(g, "hits") for g in games)
+    homers = sum(_recent_stat(g, "homeRuns", "home_runs") for g in games)
+    runs = sum(_recent_stat(g, "runs") for g in games)
+    rbi = sum(_recent_stat(g, "rbi", "runsBattedIn") for g in games)
+    steals = sum(_recent_stat(g, "stolenBases", "stolen_bases") for g in games)
+    at_bats = sum(_recent_stat(g, "atBats", "at_bats") for g in games)
+    avg = (hits / at_bats) if at_bats > 0 else 0.0
+
+    if hits + homers + runs + rbi + steals <= 0:
+        return None
+
+    score = (
+        hits
+        + homers * 4.0
+        + runs * 1.5
+        + rbi * 1.5
+        + steals * 3.0
+        + avg * 5.0
+    )
+    summary_parts = [_format_number(hits) + " H"]
+    if homers > 0:
+        summary_parts.append(_format_number(homers) + " HR")
+    if rbi > 0:
+        summary_parts.append(_format_number(rbi) + " RBI")
+    elif runs > 0:
+        summary_parts.append(_format_number(runs) + " R")
+    if steals > 0:
+        summary_parts.append(_format_number(steals) + " SB")
+
+    row = dict(player)
+    row["mlb_id"] = mlb_id
+    row["score"] = round(score, 1)
+    row["summary"] = ", ".join(summary_parts[:4])
+    return row
+
+
+def _score_hot_hand(player):
+    mlb_id = player.get("mlb_id") or get_mlb_id(player.get("name", ""))
+    if not mlb_id:
+        return None
+    games = intel._fetch_mlb_game_log(mlb_id, "pitching", 45)
+    if not games:
+        return None
+    recent = sorted(games, key=lambda g: str(g.get("date", "")), reverse=True)[:3]
+    if not recent:
+        return None
+
+    appearances = len(recent)
+    earned_runs = sum(_recent_stat(g, "earnedRuns", "earned_runs") for g in recent)
+    strikeouts = sum(_recent_stat(g, "strikeOuts", "strikeouts") for g in recent)
+    saves = sum(_recent_stat(g, "saves", "save") for g in recent)
+    holds = sum(_recent_stat(g, "holds", "hold") for g in recent)
+    clean_appearances = sum(1 for g in recent if _recent_stat(g, "earnedRuns", "earned_runs") == 0)
+
+    score = (
+        strikeouts * 2.5
+        + saves * 5.0
+        + holds * 3.0
+        + clean_appearances * 2.0
+        - earned_runs * 4.0
+    )
+    summary = (
+        str(appearances)
+        + " app, "
+        + _format_number(earned_runs)
+        + " ER, "
+        + _format_number(strikeouts)
+        + " K"
+    )
+    if saves + holds > 0:
+        summary += ", " + _format_number(saves + holds) + " SV+H"
+
+    row = dict(player)
+    row["mlb_id"] = mlb_id
+    row["score"] = round(score, 1)
+    row["summary"] = summary
+    return row
+
+
+def _candidate_free_agents(pos_type, count):
+    try:
+        _sc, _gm, lg = yahoo_fantasy.get_league()
+        pool_size = max(count * 6, 40)
+        pool_size = min(pool_size, 60)
+        free_agents = lg.free_agents(pos_type)[:pool_size]
+    except Exception:
+        return []
+
+    candidates = []
+    for player in free_agents or []:
+        if not isinstance(player, dict):
+            continue
+        name = yahoo_fantasy._player_name(player) if hasattr(yahoo_fantasy, "_player_name") else str(player.get("name", "Unknown"))
+        candidates.append({
+            "name": name,
+            "player_id": str(player.get("player_id", "")),
+            "team": _player_team_abbr(player),
+            "positions": _normalize_positions(player.get("eligible_positions", [])),
+            "percent_owned": _safe_int(player.get("percent_owned"), 0) or 0,
+            "mlb_id": player.get("mlb_id") or get_mlb_id(name),
+        })
+    return candidates
+
+
+def _rank_hot_free_agents(pos_type, count, scorer):
+    candidates = _candidate_free_agents(pos_type, count)
+    if not candidates:
+        return []
+
+    ranked = []
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [pool.submit(scorer, candidate) for candidate in candidates]
+        for future in futures:
+            try:
+                row = future.result()
+            except Exception:
+                row = None
+            if row and row.get("summary"):
+                ranked.append(row)
+
+    ranked.sort(
+        key=lambda row: (
+            -_safe_float(row.get("score"), -9999.0),
+            -_safe_int(row.get("percent_owned"), 0),
+            str(row.get("name", "")),
+        )
+    )
+    return ranked[:count]
 
 
 def _emit_request_completion(status_code, error=None):
@@ -370,6 +554,32 @@ def api_free_agents():
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/hot-bat-free-agents")
+def api_hot_bat_free_agents():
+    count = _safe_int(request.args.get("count"), 8) or 8
+    count = max(1, min(count, 25))
+    try:
+        return jsonify({
+            "window": "Last 7 days",
+            "players": _rank_hot_free_agents("B", count, _score_hot_bat),
+        })
+    except Exception:
+        return jsonify({"window": "Last 7 days", "players": []})
+
+
+@app.route("/api/hot-hand-free-agent-pitchers")
+def api_hot_hand_free_agent_pitchers():
+    count = _safe_int(request.args.get("count"), 8) or 8
+    count = max(1, min(count, 25))
+    try:
+        return jsonify({
+            "window": "Last 3 appearances",
+            "players": _rank_hot_free_agents("P", count, _score_hot_hand),
+        })
+    except Exception:
+        return jsonify({"window": "Last 3 appearances", "players": []})
 
 
 @app.route("/api/standings")

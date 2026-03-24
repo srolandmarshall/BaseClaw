@@ -75,6 +75,66 @@ class _FakeDataFrame:
             yield idx, row
 
 
+def _position_batching_stub():
+    module = _module("position_batching")
+    module.best_available_position_tokens = lambda *args, **kwargs: []
+    module.disagreement_position_tokens = lambda *args, **kwargs: []
+    module.grouped_all_payload = lambda *args, **kwargs: {}
+    module.normalize_hitter_payload = lambda payload, *args, **kwargs: payload
+    module.parse_hitter_positions_csv = lambda *args, **kwargs: []
+    module.ranking_position_tokens = lambda *args, **kwargs: []
+    module.safe_bool = lambda value, default=False: default if value is None else bool(value)
+    return module
+
+
+def _trace_utils_stub():
+    module = _module("trace_utils")
+    module.clear_trace_context = lambda *args, **kwargs: None
+    module.get_trace_context = lambda *args, **kwargs: {}
+    module.log_trace_event = lambda **kwargs: None
+    module.monotonic_ms = lambda: 1
+    module.start_request_trace = lambda *args, **kwargs: "req-test"
+    module.update_trace_context = lambda *args, **kwargs: None
+    module.trace_config = lambda: {}
+    return module
+
+
+def _flask_stub():
+    module = _module("flask")
+
+    class FakeFlask:
+        def __init__(self, _name):
+            self.view_functions = {}
+
+        def route(self, path, **_kwargs):
+            def decorator(func):
+                self.view_functions[path] = func
+                return func
+
+            return decorator
+
+        def before_request(self, func):
+            return func
+
+        def after_request(self, func):
+            return func
+
+        def teardown_request(self, func):
+            return func
+
+    module.Flask = FakeFlask
+    module.jsonify = lambda payload: payload
+    module.request = types.SimpleNamespace(
+        args={},
+        method="GET",
+        headers={},
+        path="",
+        get_json=lambda silent=False: {},
+    )
+    module.g = types.SimpleNamespace()
+    return module
+
+
 class ReliabilityHardeningTests(unittest.TestCase):
     def test_roster_cmd_accepts_string_selected_position(self):
         mlb_cache_mod = _module("mlb_id_cache")
@@ -429,6 +489,137 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 sys.modules.pop("pybaseball", None)
             else:
                 sys.modules["pybaseball"] = saved_pybaseball
+
+    def test_hot_bat_free_agents_endpoint_returns_ranked_players(self):
+        yahoo_module = _module("yahoo-fantasy")
+        yahoo_module._player_name = lambda player: player["name"]
+
+        class FakeLeague:
+            def free_agents(self, pos_type):
+                self.last_pos_type = pos_type
+                return [
+                    {
+                        "player_id": 11,
+                        "name": "Hot Bat",
+                        "editorial_team_abbr": "CLE",
+                        "eligible_positions": ["OF"],
+                        "percent_owned": 14,
+                    },
+                    {
+                        "player_id": 12,
+                        "name": "Cold Bat",
+                        "editorial_team_abbr": "PIT",
+                        "eligible_positions": ["1B"],
+                        "percent_owned": 8,
+                    },
+                ]
+
+        fake_league = FakeLeague()
+        yahoo_module.get_league = lambda: (None, None, fake_league)
+
+        intel_module = _module("intel")
+        intel_module._fetch_mlb_game_log = lambda mlb_id, group, days: (
+            [
+                {
+                    "hits": 5,
+                    "homeRuns": 2,
+                    "runs": 4,
+                    "rbi": 6,
+                    "stolenBases": 1,
+                    "atBats": 14,
+                }
+            ]
+            if mlb_id == 101 and group == "hitting" and days == 7
+            else []
+        )
+
+        api_module = _load_script(
+            "api_server_hot_bat_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "yahoo-fantasy": yahoo_module,
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": intel_module,
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda name, *args, **kwargs: {
+                        "Hot Bat": 101,
+                        "Cold Bat": 102,
+                    }.get(name)
+                ),
+            },
+        )
+
+        api_module.request.args = {"count": "1"}
+        payload = api_module.api_hot_bat_free_agents()
+
+        self.assertEqual(payload["window"], "Last 7 days")
+        self.assertEqual(len(payload["players"]), 1)
+        self.assertEqual(fake_league.last_pos_type, "B")
+        self.assertEqual(payload["players"][0]["name"], "Hot Bat")
+        self.assertEqual(payload["players"][0]["summary"], "5 H, 2 HR, 6 RBI, 1 SB")
+        self.assertEqual(payload["players"][0]["team"], "CLE")
+        self.assertEqual(payload["players"][0]["positions"], ["OF"])
+        self.assertEqual(payload["players"][0]["percent_owned"], 14)
+        self.assertEqual(payload["players"][0]["mlb_id"], 101)
+
+    def test_hot_hand_free_agent_pitchers_endpoint_degrades_to_empty_players(self):
+        yahoo_module = _module("yahoo-fantasy")
+        yahoo_module._player_name = lambda player: player["name"]
+
+        class FakeLeague:
+            def free_agents(self, _pos_type):
+                return [
+                    {
+                        "player_id": 21,
+                        "name": "No Data Arm",
+                        "editorial_team_abbr": "ATL",
+                        "eligible_positions": ["RP"],
+                        "percent_owned": 18,
+                    }
+                ]
+
+        yahoo_module.get_league = lambda: (None, None, FakeLeague())
+
+        intel_module = _module("intel")
+        intel_module._fetch_mlb_game_log = lambda *args, **kwargs: []
+
+        api_module = _load_script(
+            "api_server_hot_hand_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "yahoo-fantasy": yahoo_module,
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": intel_module,
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: 301),
+            },
+        )
+
+        api_module.request.args = {"count": "5"}
+        payload = api_module.api_hot_hand_free_agent_pitchers()
+
+        self.assertEqual(payload, {"window": "Last 3 appearances", "players": []})
 
 
 if __name__ == "__main__":
