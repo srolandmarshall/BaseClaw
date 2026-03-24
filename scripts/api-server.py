@@ -8,6 +8,7 @@ import sys
 import os
 import importlib
 import time
+from datetime import date, datetime, timezone
 from mlb_id_cache import get_mlb_id
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -231,6 +232,292 @@ def _candidate_free_agents(pos_type, count):
             "availability_type": str(player.get("availability_type", "")),
         })
     return candidates
+
+
+_INACTIVE_FANTASY_POSITIONS = {
+    "BN",
+    "BE",
+    "BENCH",
+    "IL",
+    "IL+",
+    "IL10",
+    "IL15",
+    "IL60",
+    "DL",
+    "DL10",
+    "DL15",
+    "DL60",
+    "NA",
+    "IR",
+    "RES",
+}
+
+
+def _is_inactive_fantasy_position(position):
+    token = str(position or "").strip().upper()
+    if not token:
+        return False
+    if token in _INACTIVE_FANTASY_POSITIONS:
+        return True
+    return token.startswith("IL")
+
+
+def _operator_generated_at():
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _operator_inning_display(game):
+    status = game.get("status", {}) if isinstance(game, dict) else {}
+    detailed = str(status.get("detailedState", "") or "")
+    abstract = str(status.get("abstractGameState", "") or "")
+    linescore = game.get("linescore", {}) if isinstance(game, dict) else {}
+
+    if abstract == "Live":
+        half = str(linescore.get("inningHalf", "") or linescore.get("inningState", "") or "").strip()
+        inning = linescore.get("currentInningOrdinal") or linescore.get("currentInning") or ""
+        if half and inning:
+            return str(half) + " " + str(inning)
+        if inning:
+            return str(inning)
+        return detailed or "Live"
+
+    if detailed in ("Final", "Game Over", "Completed Early"):
+        return "Final"
+
+    game_date = str(game.get("gameDate", "") or "")
+    if game_date:
+        try:
+            parsed = datetime.fromisoformat(game_date.replace("Z", "+00:00"))
+            return parsed.astimezone().strftime("%-I:%M %p")
+        except ValueError:
+            pass
+
+    return detailed or abstract or ""
+
+
+def _operator_team_abbr_map(mlb_fetch):
+    lookup = {}
+    data = mlb_fetch("/teams?sportId=1")
+    for team in data.get("teams", []) if isinstance(data, dict) else []:
+        team_id = team.get("id")
+        abbr = str(team.get("abbreviation", "") or "")
+        name = str(team.get("name", "") or "")
+        if team_id is not None and abbr:
+            lookup[str(team_id)] = abbr
+        if name and abbr:
+            lookup[name.lower()] = abbr
+    return lookup
+
+
+def _operator_normalize_game(game, abbr_lookup, my_team_name, opponent_team_name):
+    teams = game.get("teams", {}) if isinstance(game, dict) else {}
+    away = teams.get("away", {}) if isinstance(teams, dict) else {}
+    home = teams.get("home", {}) if isinstance(teams, dict) else {}
+    away_team = away.get("team", {}) if isinstance(away, dict) else {}
+    home_team = home.get("team", {}) if isinstance(home, dict) else {}
+
+    away_id = away_team.get("id")
+    home_id = home_team.get("id")
+    away_name = str(away_team.get("name", "") or "")
+    home_name = str(home_team.get("name", "") or "")
+
+    away_abbr = str(away_team.get("abbreviation", "") or "") or abbr_lookup.get(str(away_id), "") or abbr_lookup.get(away_name.lower(), "")
+    home_abbr = str(home_team.get("abbreviation", "") or "") or abbr_lookup.get(str(home_id), "") or abbr_lookup.get(home_name.lower(), "")
+
+    return {
+        "game_id": "mlb-" + str(game.get("gamePk", "")),
+        "status": str(game.get("status", {}).get("detailedState", "") or ""),
+        "inning": _operator_inning_display(game),
+        "away_team": {
+            "name": away_name,
+            "abbr": away_abbr,
+            "score": _safe_int(away.get("score"), 0) or 0,
+        },
+        "home_team": {
+            "name": home_name,
+            "abbr": home_abbr,
+            "score": _safe_int(home.get("score"), 0) or 0,
+        },
+        "my_team_name": my_team_name,
+        "opponent_team_name": opponent_team_name,
+        "my_active_count": 0,
+        "my_inactive_count": 0,
+        "opp_active_count": 0,
+        "opp_inactive_count": 0,
+        "total_relevant_count": 0,
+        "my_players": [],
+        "opp_players": [],
+    }
+
+
+def _operator_extract_current_matchup(lg):
+    raw = lg.matchups()
+    league_data = raw.get("fantasy_content", {}).get("league", []) if isinstance(raw, dict) else []
+    if len(league_data) < 2:
+        return None
+
+    scoreboard = league_data[1].get("scoreboard", {})
+    matchup_block = scoreboard.get("0", {}).get("matchups", {})
+    count = _safe_int(matchup_block.get("count"), 0) or 0
+
+    for i in range(count):
+        matchup = matchup_block.get(str(i), {}).get("matchup", {})
+        teams_data = matchup.get("0", {}).get("teams", {})
+        team1 = teams_data.get("0", {})
+        team2 = teams_data.get("1", {})
+        key1 = str(yahoo_fantasy._extract_team_key(team1) or "")
+        key2 = str(yahoo_fantasy._extract_team_key(team2) or "")
+        if yahoo_fantasy.TEAM_ID not in key1 and yahoo_fantasy.TEAM_ID not in key2:
+            continue
+
+        if yahoo_fantasy.TEAM_ID in key1:
+            return {
+                "my_team_key": key1,
+                "opp_team_key": key2,
+                "my_team_name": yahoo_fantasy._extract_team_name(team1),
+                "opp_team_name": yahoo_fantasy._extract_team_name(team2),
+            }
+
+        return {
+            "my_team_key": key2,
+            "opp_team_key": key1,
+            "my_team_name": yahoo_fantasy._extract_team_name(team2),
+            "opp_team_name": yahoo_fantasy._extract_team_name(team1),
+        }
+
+    return None
+
+
+def _operator_roster_rows(team_obj):
+    rows = []
+    if not team_obj:
+        return rows
+
+    for player in team_obj.roster() or []:
+        fantasy_position = str(yahoo_fantasy._selected_position(player) or "")
+        rows.append(
+            {
+                "name": yahoo_fantasy._player_name(player),
+                "team_abbr": str(yahoo_fantasy._player_team_abbr(player) or "").upper(),
+                "slot_status": "inactive" if _is_inactive_fantasy_position(fantasy_position) else "active",
+                "fantasy_position": fantasy_position,
+                "mlb_id": get_mlb_id(yahoo_fantasy._player_name(player)),
+            }
+        )
+    return rows
+
+
+def _operator_fill_missing_team_abbr(rows, mlb_fetch, abbr_lookup):
+    missing_ids = []
+    for row in rows:
+        if row.get("team_abbr"):
+            continue
+        mlb_id = row.get("mlb_id")
+        if mlb_id:
+            missing_ids.append(str(mlb_id))
+
+    if not missing_ids:
+        return
+
+    unique_ids = list(dict.fromkeys(missing_ids))
+    try:
+        data = mlb_fetch("/people?personIds=" + ",".join(unique_ids) + "&hydrate=currentTeam")
+    except Exception:
+        return
+
+    current_team_by_id = {}
+    for person in data.get("people", []) if isinstance(data, dict) else []:
+        person_id = str(person.get("id", "") or "")
+        current_team = person.get("currentTeam", {}) if isinstance(person, dict) else {}
+        team_id = current_team.get("id")
+        team_name = str(current_team.get("name", "") or "")
+        current_team_by_id[person_id] = (
+            abbr_lookup.get(str(team_id), "")
+            or abbr_lookup.get(team_name.lower(), "")
+        )
+
+    for row in rows:
+        if row.get("team_abbr"):
+            continue
+        resolved = current_team_by_id.get(str(row.get("mlb_id", "") or ""), "")
+        if resolved:
+            row["team_abbr"] = resolved
+
+
+def _operator_scoreboard_payload():
+    from shared import mlb_fetch
+
+    scoreboard_date = date.today().isoformat()
+    schedule_data = mlb_fetch("/schedule?sportId=1&date=" + scoreboard_date + "&hydrate=linescore,team")
+    abbr_lookup = _operator_team_abbr_map(mlb_fetch)
+
+    my_rows = []
+    opp_rows = []
+    my_team_name = ""
+    opponent_team_name = ""
+
+    try:
+        _, _, lg = yahoo_fantasy.get_league()
+        matchup = _operator_extract_current_matchup(lg)
+        if matchup:
+            my_team_name = str(matchup.get("my_team_name", "") or "")
+            opponent_team_name = str(matchup.get("opp_team_name", "") or "")
+            my_rows = _operator_roster_rows(lg.to_team(matchup.get("my_team_key", "")))
+            opp_rows = _operator_roster_rows(lg.to_team(matchup.get("opp_team_key", "")))
+            _operator_fill_missing_team_abbr(my_rows, mlb_fetch, abbr_lookup)
+            _operator_fill_missing_team_abbr(opp_rows, mlb_fetch, abbr_lookup)
+    except Exception:
+        my_rows = []
+        opp_rows = []
+
+    my_by_team = {}
+    opp_by_team = {}
+
+    for row in my_rows:
+        team_abbr = row.get("team_abbr", "")
+        if team_abbr:
+            my_by_team.setdefault(team_abbr, []).append(
+                {
+                    "name": row.get("name", ""),
+                    "slot_status": row.get("slot_status", "active"),
+                    "fantasy_position": row.get("fantasy_position", ""),
+                }
+            )
+
+    for row in opp_rows:
+        team_abbr = row.get("team_abbr", "")
+        if team_abbr:
+            opp_by_team.setdefault(team_abbr, []).append(
+                {
+                    "name": row.get("name", ""),
+                    "slot_status": row.get("slot_status", "active"),
+                    "fantasy_position": row.get("fantasy_position", ""),
+                }
+            )
+
+    games = []
+    for date_block in schedule_data.get("dates", []) if isinstance(schedule_data, dict) else []:
+        for game in date_block.get("games", []) if isinstance(date_block, dict) else []:
+            normalized = _operator_normalize_game(game, abbr_lookup, my_team_name, opponent_team_name)
+            away_abbr = str(normalized["away_team"].get("abbr", "") or "").upper()
+            home_abbr = str(normalized["home_team"].get("abbr", "") or "").upper()
+            my_players = list(my_by_team.get(away_abbr, [])) + list(my_by_team.get(home_abbr, []))
+            opp_players = list(opp_by_team.get(away_abbr, [])) + list(opp_by_team.get(home_abbr, []))
+
+            normalized["my_players"] = my_players
+            normalized["opp_players"] = opp_players
+            normalized["my_active_count"] = sum(1 for p in my_players if p.get("slot_status") == "active")
+            normalized["my_inactive_count"] = sum(1 for p in my_players if p.get("slot_status") != "active")
+            normalized["opp_active_count"] = sum(1 for p in opp_players if p.get("slot_status") == "active")
+            normalized["opp_inactive_count"] = sum(1 for p in opp_players if p.get("slot_status") != "active")
+            normalized["total_relevant_count"] = len(my_players) + len(opp_players)
+            games.append(normalized)
+
+    return {
+        "date": scoreboard_date,
+        "generated_at": _operator_generated_at(),
+        "games": games,
+    }
 
 
 def _rank_hot_free_agents(pos_type, count, scorer):
@@ -760,6 +1047,20 @@ def api_scoreboard():
         if week:
             args.append(week)
         result = yahoo_fantasy.cmd_scoreboard(args, as_json=True)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/operator-scoreboard")
+def api_operator_scoreboard():
+    cache_key = ("operator-scoreboard", date.today().isoformat())
+    cached = _dashboard_cache_get(cache_key, 30)
+    if cached is not None:
+        return jsonify(cached)
+    try:
+        result = _operator_scoreboard_payload()
+        _dashboard_cache_set(cache_key, result)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500

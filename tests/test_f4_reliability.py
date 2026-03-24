@@ -666,6 +666,266 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
         self.assertEqual(payload, {"window": "Last 3 appearances", "players": []})
 
+    def test_operator_scoreboard_endpoint_enriches_games_with_matchup_counts(self):
+        shared_module = _shared_stub()
+
+        def fake_mlb_fetch(endpoint, *_args, **_kwargs):
+            if endpoint.startswith("/teams?sportId=1"):
+                return {
+                    "teams": [
+                        {"id": 10, "name": "New York Yankees", "abbreviation": "NYY"},
+                        {"id": 11, "name": "Boston Red Sox", "abbreviation": "BOS"},
+                        {"id": 12, "name": "Los Angeles Dodgers", "abbreviation": "LAD"},
+                        {"id": 13, "name": "Chicago Cubs", "abbreviation": "CHC"},
+                        {"id": 14, "name": "Seattle Mariners", "abbreviation": "SEA"},
+                        {"id": 15, "name": "Houston Astros", "abbreviation": "HOU"},
+                    ]
+                }
+            if endpoint.startswith("/schedule?sportId=1&date=2026-03-24"):
+                return {
+                    "dates": [
+                        {
+                            "date": "2026-03-24",
+                            "games": [
+                                {
+                                    "gamePk": 11,
+                                    "gameDate": "2026-03-24T23:10:00Z",
+                                    "status": {"abstractGameState": "Live", "detailedState": "In Progress"},
+                                    "linescore": {"inningHalf": "Top", "currentInningOrdinal": "6th"},
+                                    "teams": {
+                                        "away": {"score": 4, "team": {"id": 10, "name": "New York Yankees"}},
+                                        "home": {"score": 2, "team": {"id": 11, "name": "Boston Red Sox"}},
+                                    },
+                                },
+                                {
+                                    "gamePk": 22,
+                                    "gameDate": "2026-03-25T00:05:00Z",
+                                    "status": {"abstractGameState": "Preview", "detailedState": "Scheduled"},
+                                    "teams": {
+                                        "away": {"score": 0, "team": {"id": 12, "name": "Los Angeles Dodgers"}},
+                                        "home": {"score": 0, "team": {"id": 13, "name": "Chicago Cubs"}},
+                                    },
+                                },
+                                {
+                                    "gamePk": 33,
+                                    "gameDate": "2026-03-25T01:10:00Z",
+                                    "status": {"abstractGameState": "Preview", "detailedState": "Scheduled"},
+                                    "teams": {
+                                        "away": {"score": 0, "team": {"id": 14, "name": "Seattle Mariners"}},
+                                        "home": {"score": 0, "team": {"id": 15, "name": "Houston Astros"}},
+                                    },
+                                },
+                            ],
+                        }
+                    ]
+                }
+            return {}
+
+        shared_module.mlb_fetch = fake_mlb_fetch
+
+        yahoo_module = _module("yahoo-fantasy")
+        yahoo_module.TEAM_ID = "422.l.1.t.8"
+        yahoo_module._extract_team_key = lambda team_data: team_data.get("team_key", "")
+        yahoo_module._extract_team_name = lambda team_data: team_data.get("name", "")
+        yahoo_module._selected_position = lambda player: player.get("selected_position", "")
+        yahoo_module._player_name = lambda player: player.get("name", "")
+        yahoo_module._player_team_abbr = lambda player: player.get("editorial_team_abbr", "")
+
+        class FakeRosterTeam:
+            def __init__(self, players):
+                self._players = players
+
+            def roster(self):
+                return list(self._players)
+
+        class FakeLeague:
+            def matchups(self):
+                return {
+                    "fantasy_content": {
+                        "league": [
+                            None,
+                            {
+                                "scoreboard": {
+                                    "0": {
+                                        "matchups": {
+                                            "count": 1,
+                                            "0": {
+                                                "matchup": {
+                                                    "0": {
+                                                        "teams": {
+                                                            "0": {"team_key": "422.l.1.t.8", "name": "Marsh'n Monsters"},
+                                                            "1": {"team_key": "422.l.1.t.4", "name": "Bobby Bonilla's IRA"},
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                        }
+                                    }
+                                }
+                            },
+                        ]
+                    }
+                }
+
+            def to_team(self, team_key):
+                if team_key == "422.l.1.t.8":
+                    return FakeRosterTeam(
+                        [
+                            {"name": "My Starter", "selected_position": "OF", "editorial_team_abbr": "NYY"},
+                            {"name": "My Bench Bat", "selected_position": "BN", "editorial_team_abbr": "CHC"},
+                        ]
+                    )
+                if team_key == "422.l.1.t.4":
+                    return FakeRosterTeam(
+                        [
+                            {"name": "Opp Starter", "selected_position": "Util", "editorial_team_abbr": "BOS"},
+                            {"name": "Opp IL Arm", "selected_position": "IL", "editorial_team_abbr": "LAD"},
+                        ]
+                    )
+                return FakeRosterTeam([])
+
+        yahoo_module.get_league = lambda: (None, None, FakeLeague())
+
+        api_module = _load_script(
+            "api_server_operator_scoreboard_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": shared_module,
+                "yahoo-fantasy": yahoo_module,
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        api_module.sys.modules["shared"] = shared_module
+        api_module.request.args = {}
+
+        class FakeDate:
+            @staticmethod
+            def today():
+                return date(2026, 3, 24)
+
+        with patch.object(api_module, "date", FakeDate):
+            payload = api_module.api_operator_scoreboard()
+
+        self.assertEqual(payload["date"], "2026-03-24")
+        self.assertIn("generated_at", payload)
+        self.assertEqual(len(payload["games"]), 3)
+
+        live_game = next(game for game in payload["games"] if game["game_id"] == "mlb-11")
+        self.assertEqual(live_game["status"], "In Progress")
+        self.assertEqual(live_game["inning"], "Top 6th")
+        self.assertEqual(live_game["away_team"]["abbr"], "NYY")
+        self.assertEqual(live_game["home_team"]["abbr"], "BOS")
+        self.assertEqual(live_game["my_team_name"], "Marsh'n Monsters")
+        self.assertEqual(live_game["opponent_team_name"], "Bobby Bonilla's IRA")
+        self.assertEqual(live_game["my_active_count"], 1)
+        self.assertEqual(live_game["my_inactive_count"], 0)
+        self.assertEqual(live_game["opp_active_count"], 1)
+        self.assertEqual(live_game["opp_inactive_count"], 0)
+        self.assertEqual(live_game["total_relevant_count"], 2)
+        self.assertEqual(live_game["my_players"][0]["slot_status"], "active")
+        self.assertEqual(live_game["opp_players"][0]["fantasy_position"], "Util")
+
+        scheduled_game = next(game for game in payload["games"] if game["game_id"] == "mlb-22")
+        self.assertEqual(scheduled_game["my_inactive_count"], 1)
+        self.assertEqual(scheduled_game["opp_inactive_count"], 1)
+        self.assertEqual(scheduled_game["total_relevant_count"], 2)
+
+        empty_game = next(game for game in payload["games"] if game["game_id"] == "mlb-33")
+        self.assertEqual(empty_game["total_relevant_count"], 0)
+        self.assertEqual(empty_game["my_players"], [])
+        self.assertEqual(empty_game["opp_players"], [])
+
+    def test_operator_scoreboard_endpoint_degrades_when_fantasy_linkage_fails(self):
+        shared_module = _shared_stub()
+        shared_module.mlb_fetch = lambda endpoint, *_args, **_kwargs: (
+            {
+                "teams": [{"id": 10, "name": "New York Yankees", "abbreviation": "NYY"}]
+            }
+            if endpoint.startswith("/teams?sportId=1")
+            else {
+                "dates": [
+                    {
+                        "date": "2026-03-24",
+                        "games": [
+                            {
+                                "gamePk": 44,
+                                "gameDate": "2026-03-24T23:10:00Z",
+                                "status": {"abstractGameState": "Preview", "detailedState": "Scheduled"},
+                                "teams": {
+                                    "away": {"score": 0, "team": {"id": 10, "name": "New York Yankees"}},
+                                    "home": {"score": 0, "team": {"id": 10, "name": "New York Yankees"}},
+                                },
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+
+        yahoo_module = _module("yahoo-fantasy")
+        yahoo_module.TEAM_ID = "422.l.1.t.8"
+        yahoo_module.get_league = lambda: (_ for _ in ()).throw(RuntimeError("yahoo down"))
+        yahoo_module._extract_team_key = lambda *_args, **_kwargs: ""
+        yahoo_module._extract_team_name = lambda *_args, **_kwargs: ""
+        yahoo_module._selected_position = lambda *_args, **_kwargs: ""
+        yahoo_module._player_name = lambda *_args, **_kwargs: ""
+        yahoo_module._player_team_abbr = lambda *_args, **_kwargs: ""
+
+        api_module = _load_script(
+            "api_server_operator_scoreboard_degraded_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": shared_module,
+                "yahoo-fantasy": yahoo_module,
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        api_module.sys.modules["shared"] = shared_module
+
+        class FakeDate:
+            @staticmethod
+            def today():
+                return date(2026, 3, 24)
+
+        with patch.object(api_module, "date", FakeDate):
+            payload = api_module.api_operator_scoreboard()
+
+        self.assertEqual(payload["date"], "2026-03-24")
+        self.assertEqual(len(payload["games"]), 1)
+        self.assertEqual(payload["games"][0]["total_relevant_count"], 0)
+        self.assertEqual(payload["games"][0]["my_players"], [])
+        self.assertEqual(payload["games"][0]["opp_players"], [])
+        self.assertEqual(payload["games"][0]["my_team_name"], "")
+        self.assertEqual(payload["games"][0]["opponent_team_name"], "")
+
     def test_best_available_skips_refresh_for_free_agent_list(self):
         valuations_module = _module("valuations")
         valuations_module.load_all = lambda: ([], [], "test")
