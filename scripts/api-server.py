@@ -208,7 +208,11 @@ def _candidate_free_agents(pos_type, count):
     try:
         pool_size = max(count * 6, 40)
         pool_size = min(pool_size, 60)
-        available_players = yahoo_fantasy.get_available_players(pos_type, pool_size)
+        if hasattr(yahoo_fantasy, "get_available_players"):
+            available_players = yahoo_fantasy.get_available_players(pos_type, pool_size)
+        else:
+            _, _, league = yahoo_fantasy.get_league()
+            available_players = league.free_agents(pos_type)[:pool_size] if league else []
     except Exception:
         return []
 
@@ -220,7 +224,7 @@ def _candidate_free_agents(pos_type, count):
         candidates.append({
             "name": name,
             "player_id": str(player.get("player_id", "")),
-            "team": str(player.get("team", "")),
+            "team": str(player.get("team") or player.get("editorial_team_abbr") or ""),
             "positions": _normalize_positions(player.get("positions", player.get("eligible_positions", []))),
             "percent_owned": _safe_int(player.get("percent_owned"), 0) or 0,
             "mlb_id": player.get("mlb_id") or get_mlb_id(name),
@@ -388,14 +392,13 @@ _heartbeat_thread = threading.Thread(target=_run_heartbeat, daemon=True)
 _heartbeat_thread.start()
 
 
-# --- Startup projection fetch ---
+# --- Optional startup projection warmup ---
 
 def _startup_projections():
-    """Background thread: load projections then pre-warm the rankings cache.
+    """Background warmup for projections/rankings.
 
-    Warms two cache buckets:
-    - enrich=False, count=DRAFT_POOL_COUNT (200+ batters, 150+ pitchers) — for draft tools
-    - enrich=True,  count=RANKINGS_WARMUP_COUNT (~150) — for research runs / chat
+    Disabled by default because warming projections and enriched rankings on each
+    cold boot makes operational API routes too slow for Fly auto-start traffic.
     """
     import time
     time.sleep(5)  # Let other startup tasks settle
@@ -433,9 +436,20 @@ def _startup_projections():
     except Exception as e:
         print("Enriched rankings warmup failed: " + str(e))
 
+def _maybe_start_projection_warmup():
+    raw = str(os.environ.get("ENABLE_STARTUP_WARMUP", "") or "").strip().lower()
+    enabled = raw in {"1", "true", "yes", "on"}
+    if not enabled:
+        print("Startup rankings warmup disabled")
+        return None
 
-_proj_thread = threading.Thread(target=_startup_projections, daemon=True)
-_proj_thread.start()
+    print("Startup rankings warmup enabled")
+    proj_thread = threading.Thread(target=_startup_projections, daemon=True)
+    proj_thread.start()
+    return proj_thread
+
+
+_proj_thread = _maybe_start_projection_warmup()
 
 
 # --- Rankings response cache ---
