@@ -206,25 +206,25 @@ def _score_hot_hand(player):
 
 def _candidate_free_agents(pos_type, count):
     try:
-        _sc, _gm, lg = yahoo_fantasy.get_league()
         pool_size = max(count * 6, 40)
         pool_size = min(pool_size, 60)
-        free_agents = lg.free_agents(pos_type)[:pool_size]
+        available_players = yahoo_fantasy.get_available_players(pos_type, pool_size)
     except Exception:
         return []
 
     candidates = []
-    for player in free_agents or []:
+    for player in available_players or []:
         if not isinstance(player, dict):
             continue
-        name = yahoo_fantasy._player_name(player) if hasattr(yahoo_fantasy, "_player_name") else str(player.get("name", "Unknown"))
+        name = str(player.get("name", "Unknown"))
         candidates.append({
             "name": name,
             "player_id": str(player.get("player_id", "")),
-            "team": _player_team_abbr(player),
-            "positions": _normalize_positions(player.get("eligible_positions", [])),
+            "team": str(player.get("team", "")),
+            "positions": _normalize_positions(player.get("positions", player.get("eligible_positions", []))),
             "percent_owned": _safe_int(player.get("percent_owned"), 0) or 0,
             "mlb_id": player.get("mlb_id") or get_mlb_id(name),
+            "availability_type": str(player.get("availability_type", "")),
         })
     return candidates
 
