@@ -8,6 +8,7 @@ import sys
 import json
 import time
 import os
+import importlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import yahoo_fantasy_api as yfa
 from valuations import load_all, get_player_by_name
@@ -18,6 +19,7 @@ TEAM_ID = os.environ.get("TEAM_ID", "")
 _BEST_AVAILABLE_CACHE = {}
 _BEST_AVAILABLE_TTL = int(os.environ.get("BEST_AVAILABLE_CACHE_TTL_SECONDS", "45"))
 _BEST_AVAILABLE_INTEL_COUNT = int(os.environ.get("BEST_AVAILABLE_INTEL_COUNT", "8"))
+_yahoo_fantasy = importlib.import_module("yahoo-fantasy")
 
 
 def _truthy(value):
@@ -113,17 +115,18 @@ class DraftAssistant:
 
     def get_available(self, pos_type="B", limit=20):
         """Get best available players, sorted by z-score when available"""
-        fa = self.lg.free_agents(pos_type)
+        fa = _yahoo_fantasy.get_available_players(pos_type, None)
         available = []
 
         for p in fa:
             pid = p.get("player_id")
-            if pid not in self.drafted_players:
-                # Attach z-score if available
-                name = p.get("name", "")
-                z = self._get_zscore(name, pos_type)
-                p["z_score"] = z
-                available.append(p)
+            if pid in self.drafted_players:
+                continue
+            name = p.get("name", "")
+            player_pos_type = pos_type if pos_type != "ALL" else _yahoo_fantasy._infer_pos_type(p.get("eligible_positions", []))
+            z = self._get_zscore(name, player_pos_type)
+            p["z_score"] = z
+            available.append(p)
 
         # Sort by z-score (highest first) if valuations are loaded
         has_z = any(p.get("z_score") is not None for p in available)
@@ -401,8 +404,10 @@ def cmd_best_available(args, as_json=False):
                 "rank": i,
                 "name": p.get("name", "?"),
                 "positions": p.get("eligible_positions", []),
+                "team": p.get("team", ""),
                 "z_score": round(float(z), 2) if z is not None else None,
                 "mlb_id": get_mlb_id(p.get("name", "")),
+                "availability_type": p.get("availability_type", ""),
             })
         if include_intel and players:
             enrich_count = max(0, min(len(players), _BEST_AVAILABLE_INTEL_COUNT))

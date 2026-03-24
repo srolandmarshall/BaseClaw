@@ -684,6 +684,10 @@ class ReliabilityHardeningTests(unittest.TestCase):
                     get_connection=lambda *_args, **_kwargs: object(),
                     LEAGUE_ID="422.l.1",
                 ),
+                "yahoo-fantasy": types.SimpleNamespace(
+                    get_available_players=lambda *_args, **_kwargs: [],
+                    _infer_pos_type=lambda *_args, **_kwargs: "B",
+                ),
             },
         )
 
@@ -706,6 +710,141 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(refresh_calls, [])
         self.assertEqual(payload["players"][0]["name"], "Fast FA")
         self.assertEqual(payload["players"][0]["z_score"], 2.75)
+
+    def test_free_agents_combines_waivers_and_true_free_agents(self):
+        mlb_cache_mod = _module("mlb_id_cache")
+        mlb_cache_mod.get_mlb_id = lambda name, *args, **kwargs: {
+            "Waiver Bat": 101,
+            "True Free Agent": 102,
+        }.get(name, 0)
+
+        shared = _shared_stub()
+        shared.enrich_with_intel = lambda *_args, **_kwargs: None
+        shared.enrich_with_trends = lambda *_args, **_kwargs: None
+
+        module = _load_script(
+            "yahoo_fantasy_available_script_for_test",
+            "yahoo-fantasy.py",
+            {
+                "shared": shared,
+                "yahoo_fantasy_api": _module("yahoo_fantasy_api"),
+                "yahoo_oauth": types.SimpleNamespace(OAuth2=object),
+                "mlb_id_cache": mlb_cache_mod,
+                "yahoo_browser": types.SimpleNamespace(
+                    is_scope_error=lambda *_args, **_kwargs: False,
+                    write_method=lambda *_args, **_kwargs: None,
+                ),
+            },
+        )
+
+        class FakeLeague:
+            def waivers(self):
+                return [
+                    {
+                        "player_id": "1",
+                        "name": "Waiver Bat",
+                        "eligible_positions": ["OF", "Util"],
+                        "percent_owned": 12,
+                        "editorial_team_abbr": "SEA",
+                    }
+                ]
+
+            def free_agents(self, pos_type):
+                if pos_type == "B":
+                    return [
+                        {
+                            "player_id": "2",
+                            "name": "True Free Agent",
+                            "eligible_positions": ["1B", "Util"],
+                            "percent_owned": 4,
+                            "editorial_team_abbr": "PIT",
+                        }
+                    ]
+                return []
+
+        module.get_league = lambda: (None, None, FakeLeague())
+
+        payload = module.cmd_free_agents(["B", "5", "false"], as_json=True)
+
+        self.assertEqual(len(payload["players"]), 2)
+        self.assertEqual(payload["players"][0]["availability_type"], "free_agent")
+        self.assertEqual(payload["players"][1]["availability_type"], "waiver")
+        self.assertEqual(payload["players"][0]["team"], "PIT")
+        self.assertEqual(payload["players"][1]["team"], "SEA")
+
+    def test_best_available_uses_combined_available_pool(self):
+        valuations_module = _module("valuations")
+        valuations_module.load_all = lambda: ([], [], "test")
+        valuations_module.get_player_by_name = lambda name, *_args, **_kwargs: [
+            {"Z_Final": 3.5}
+        ] if name == "Waiver Arm" else [{"Z_Final": 2.1}]
+
+        yahoo_module = _module("yahoo-fantasy")
+        yahoo_module._infer_pos_type = lambda positions: "P" if "SP" in positions else "B"
+        yahoo_module.get_available_players = lambda pos_type, _count=None: [
+            {
+                "player_id": "9",
+                "name": "Waiver Arm",
+                "eligible_positions": ["SP", "P"],
+                "team": "ATL",
+                "availability_type": "waiver",
+            },
+            {
+                "player_id": "10",
+                "name": "Free Arm",
+                "eligible_positions": ["SP", "P"],
+                "team": "MIA",
+                "availability_type": "free_agent",
+            },
+        ] if pos_type == "P" else []
+
+        draft_module = _load_script(
+            "draft_assistant_available_pool_test",
+            "draft-assistant.py",
+            {
+                "yahoo_fantasy_api": _module("yahoo_fantasy_api"),
+                "valuations": valuations_module,
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: 88),
+                "shared": types.SimpleNamespace(
+                    enrich_with_intel=lambda *_args, **_kwargs: None,
+                    get_team_key=lambda *_args, **_kwargs: "422.l.1.t.7",
+                    get_connection=lambda *_args, **_kwargs: object(),
+                    LEAGUE_ID="422.l.1",
+                ),
+                "yahoo-fantasy": yahoo_module,
+            },
+        )
+
+        class FakeDraftAssistant:
+            def __init__(self):
+                self.drafted_players = set()
+
+            def get_available(self, _pos_type="P", _limit=20):
+                return [
+                    {
+                        "player_id": "9",
+                        "name": "Waiver Arm",
+                        "eligible_positions": ["SP", "P"],
+                        "team": "ATL",
+                        "availability_type": "waiver",
+                        "z_score": 3.5,
+                    },
+                    {
+                        "player_id": "10",
+                        "name": "Free Arm",
+                        "eligible_positions": ["SP", "P"],
+                        "team": "MIA",
+                        "availability_type": "free_agent",
+                        "z_score": 2.1,
+                    },
+                ]
+
+        draft_module.DraftAssistant = FakeDraftAssistant
+        payload = draft_module.cmd_best_available(["P", "2", "false"], as_json=True)
+
+        self.assertEqual(payload["players"][0]["name"], "Waiver Arm")
+        self.assertEqual(payload["players"][0]["availability_type"], "waiver")
+        self.assertEqual(payload["players"][0]["team"], "ATL")
 
 
 if __name__ == "__main__":

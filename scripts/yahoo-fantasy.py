@@ -5,6 +5,7 @@ import sys
 import json
 import os
 import datetime
+import importlib
 import yahoo_fantasy_api as yfa
 from yahoo_oauth import OAuth2
 from mlb_id_cache import get_mlb_id
@@ -76,6 +77,103 @@ def _truthy(value):
     return str(value).strip().lower() not in ("0", "false", "no", "off", "")
 
 
+def _infer_pos_type(eligible_positions):
+    tokens = [str(pos or "").strip().upper() for pos in (eligible_positions or [])]
+    pitcher_pos = {"SP", "RP", "P"}
+    batter_pos = {"C", "1B", "2B", "3B", "SS", "OF", "LF", "CF", "RF", "DH", "UTIL"}
+    pitcher_count = sum(1 for p in tokens if p in pitcher_pos)
+    batter_count = sum(1 for p in tokens if p in batter_pos)
+    if pitcher_count > batter_count:
+        return "P"
+    return "B"
+
+
+def _matches_pos_type(player, pos_type):
+    pos_type = str(pos_type or "B").upper()
+    if pos_type == "ALL":
+        return True
+    return _infer_pos_type(_eligible_positions(player)) == pos_type
+
+
+def _normalize_available_player(player, availability_type):
+    name = _player_name(player)
+    positions = _eligible_positions(player)
+    return {
+        "name": name,
+        "player_id": str(player.get("player_id", "")),
+        "positions": positions,
+        "eligible_positions": positions,
+        "percent_owned": player.get("percent_owned", 0),
+        "status": player.get("status", ""),
+        "team": _player_team_abbr(player),
+        "mlb_id": get_mlb_id(name),
+        "availability_type": availability_type,
+    }
+
+
+def get_available_players(pos_type="B", count=None):
+    """Return available players from waivers plus true free agents."""
+    sc, gm, lg = get_league()
+    pos_type = str(pos_type or "B").upper()
+    limit = int(count) if count else None
+
+    combined = {}
+
+    def merge_rows(rows, availability_type):
+        for raw in rows or []:
+            if not isinstance(raw, dict):
+                continue
+            if not _matches_pos_type(raw, pos_type):
+                continue
+            normalized = _normalize_available_player(raw, availability_type)
+            key = normalized["player_id"] or normalized["name"].lower()
+            if not key:
+                continue
+            existing = combined.get(key)
+            if existing is None:
+                combined[key] = normalized
+                continue
+            if availability_type == "free_agent":
+                existing["availability_type"] = "free_agent"
+            existing["percent_owned"] = max(existing.get("percent_owned", 0), normalized.get("percent_owned", 0))
+            if normalized.get("team"):
+                existing["team"] = normalized["team"]
+            if normalized.get("status"):
+                existing["status"] = normalized["status"]
+            if normalized.get("mlb_id"):
+                existing["mlb_id"] = normalized["mlb_id"]
+            if normalized.get("positions"):
+                existing["positions"] = normalized["positions"]
+                existing["eligible_positions"] = normalized["eligible_positions"]
+
+    try:
+        merge_rows(lg.waivers(), "waiver")
+    except Exception:
+        pass
+
+    if pos_type == "ALL":
+        free_agent_groups = ("B", "P")
+    else:
+        free_agent_groups = (pos_type,)
+    for group in free_agent_groups:
+        try:
+            merge_rows(lg.free_agents(group), "free_agent")
+        except Exception:
+            pass
+
+    players = list(combined.values())
+    players.sort(
+        key=lambda p: (
+            0 if p.get("availability_type") == "free_agent" else 1,
+            -float(p.get("percent_owned", 0) or 0),
+            p.get("name", ""),
+        )
+    )
+    if limit is not None:
+        players = players[:limit]
+    return players
+
+
 def cmd_roster(args, as_json=False):
     """Show current roster"""
     include_intel = _truthy(args[0]) if args else True
@@ -123,38 +221,28 @@ def cmd_roster(args, as_json=False):
 
 
 def cmd_free_agents(args, as_json=False):
-    """List free agents (B=batters, P=pitchers)"""
+    """List available players (waivers + true free agents)."""
     pos_type = args[0] if args else "B"
     count = int(args[1]) if len(args) > 1 else 20
-    sc, gm, lg = get_league()
-
-    fa = lg.free_agents(pos_type)[:count]
+    include_intel = _truthy(args[2]) if len(args) > 2 else False
+    fa = get_available_players(pos_type, count)
 
     if as_json:
-        players = []
-        for p in fa:
-            players.append(
-                {
-                    "name": p.get("name", "Unknown"),
-                    "player_id": p.get("player_id", "?"),
-                    "positions": p.get("eligible_positions", ["?"]),
-                    "percent_owned": p.get("percent_owned", 0),
-                    "status": p.get("status", ""),
-                    "mlb_id": get_mlb_id(p.get("name", "")),
-                }
-            )
-        enrich_with_intel(players)
-        enrich_with_trends(players)
+        players = [dict(p) for p in fa]
+        if include_intel:
+            enrich_with_intel(players)
+            enrich_with_trends(players)
         return {"pos_type": pos_type, "count": count, "players": players}
 
-    label = "Batters" if pos_type == "B" else "Pitchers"
-    print("Top " + str(count) + " Free Agent " + label + ":")
+    label = "Batters" if pos_type == "B" else ("Pitchers" if pos_type == "P" else "Players")
+    print("Top " + str(count) + " Available " + label + ":")
     for p in fa:
         name = p.get("name", "Unknown")
-        positions = ",".join(p.get("eligible_positions", ["?"]))
+        positions = ",".join(p.get("positions", ["?"]))
         pct = p.get("percent_owned", 0)
         pid = p.get("player_id", "?")
         status = p.get("status", "")
+        source = p.get("availability_type", "")
         if status:
             status = " [" + status + "]"
         line = (
@@ -169,6 +257,8 @@ def cmd_free_agents(args, as_json=False):
             + ")"
             + status
         )
+        if source:
+            line += " {" + source + "}"
         print(line)
 
 
