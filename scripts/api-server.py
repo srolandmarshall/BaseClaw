@@ -7,6 +7,7 @@ Routes match the TypeScript MCP Apps server's python-client.ts expectations.
 import sys
 import os
 import importlib
+import time
 from mlb_id_cache import get_mlb_id
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -44,6 +45,22 @@ import player_universe
 import draft_sim
 
 app = Flask(__name__)
+_DASHBOARD_CACHE = {}
+
+
+def _dashboard_cache_get(key, ttl_seconds):
+    entry = _DASHBOARD_CACHE.get(key)
+    if not entry:
+        return None
+    payload, ts = entry
+    if time.time() - ts > ttl_seconds:
+        _DASHBOARD_CACHE.pop(key, None)
+        return None
+    return payload
+
+
+def _dashboard_cache_set(key, payload):
+    _DASHBOARD_CACHE[key] = (payload, time.time())
 
 
 def _safe_int(value, default=None):
@@ -538,8 +555,13 @@ def api_change_team_logo():
 
 @app.route("/api/roster")
 def api_roster():
+    cache_key = ("roster",)
+    cached = _dashboard_cache_get(cache_key, 30)
+    if cached is not None:
+        return jsonify(cached)
     try:
-        result = yahoo_fantasy.cmd_roster([], as_json=True)
+        result = yahoo_fantasy.cmd_roster(["false"], as_json=True)
+        _dashboard_cache_set(cache_key, result)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -560,11 +582,17 @@ def api_free_agents():
 def api_hot_bat_free_agents():
     count = _safe_int(request.args.get("count"), 8) or 8
     count = max(1, min(count, 25))
+    cache_key = ("hot-bat-free-agents", count)
+    cached = _dashboard_cache_get(cache_key, 120)
+    if cached is not None:
+        return jsonify(cached)
     try:
-        return jsonify({
+        result = {
             "window": "Last 7 days",
             "players": _rank_hot_free_agents("B", count, _score_hot_bat),
-        })
+        }
+        _dashboard_cache_set(cache_key, result)
+        return jsonify(result)
     except Exception:
         return jsonify({"window": "Last 7 days", "players": []})
 
@@ -573,11 +601,17 @@ def api_hot_bat_free_agents():
 def api_hot_hand_free_agent_pitchers():
     count = _safe_int(request.args.get("count"), 8) or 8
     count = max(1, min(count, 25))
+    cache_key = ("hot-hand-free-agent-pitchers", count)
+    cached = _dashboard_cache_get(cache_key, 120)
+    if cached is not None:
+        return jsonify(cached)
     try:
-        return jsonify({
+        result = {
             "window": "Last 3 appearances",
             "players": _rank_hot_free_agents("P", count, _score_hot_hand),
-        })
+        }
+        _dashboard_cache_set(cache_key, result)
+        return jsonify(result)
     except Exception:
         return jsonify({"window": "Last 3 appearances", "players": []})
 
@@ -802,6 +836,17 @@ def api_best_available():
         include_intel = request.args.get("include_intel", "false")
         group_by_position = _safe_bool(request.args.get("group_by_position", "false"))
         positions = _parse_hitter_positions_csv(request.args.get("positions", ""))
+        cache_key = (
+            "best-available",
+            pos_type,
+            str(count),
+            str(include_intel).lower(),
+            bool(group_by_position),
+            tuple(positions),
+        )
+        cached = _dashboard_cache_get(cache_key, 45)
+        if cached is not None:
+            return jsonify(cached)
 
         def _fetch_best_available():
             if pos_type == "ALL":
@@ -836,7 +881,9 @@ def api_best_available():
                 empty_p = {"pos_type": "P", "players": []}
                 fallback = _grouped_all_payload(empty_b, empty_p) if pos_type == "ALL" else {"pos_type": pos_type, "players": []}
                 return jsonify(fallback)
-            return jsonify(future.result())
+            result = future.result()
+            _dashboard_cache_set(cache_key, result)
+            return jsonify(result)
         finally:
             pool.shutdown(wait=False)
     except ValueError as e:
@@ -2370,8 +2417,14 @@ def api_news_sources():
 def api_probable_pitchers():
     try:
         days = request.args.get("days", "7")
+        cache_key = ("probable-pitchers", str(days))
+        cached = _dashboard_cache_get(cache_key, 300)
+        if cached is not None:
+            return jsonify(cached)
         result = season_manager.fetch_probable_pitchers(int(days))
-        return jsonify({"pitchers": result})
+        payload = {"pitchers": result}
+        _dashboard_cache_set(cache_key, payload)
+        return jsonify(payload)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

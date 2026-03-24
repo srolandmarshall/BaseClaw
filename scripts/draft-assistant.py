@@ -391,8 +391,6 @@ def cmd_best_available(args, as_json=False):
             return cached
 
     da = DraftAssistant()
-    da.refresh()
-
     available = da.get_available(pos_type, count)
 
     if as_json:

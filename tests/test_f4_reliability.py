@@ -176,6 +176,51 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(payload["players"][0]["eligible_positions"], ["C", "1B", "Util"])
         self.assertEqual(payload["players"][0]["mlb_id"], "mlb-Ben Rice")
 
+    def test_roster_cmd_can_skip_intel_and_returns_dashboard_fields(self):
+        mlb_cache_mod = _module("mlb_id_cache")
+        mlb_cache_mod.get_mlb_id = lambda name, *args, **kwargs: "mlb-" + str(name)
+
+        shared = _shared_stub()
+        enrich_calls = []
+        shared.enrich_with_intel = lambda players, *args, **kwargs: enrich_calls.append(len(players))
+
+        module = _load_script(
+            "yahoo_fantasy_roster_lite_script_for_test",
+            "yahoo-fantasy.py",
+            {
+                "shared": shared,
+                "yahoo_fantasy_api": _module("yahoo_fantasy_api"),
+                "yahoo_oauth": types.SimpleNamespace(OAuth2=object),
+                "mlb_id_cache": mlb_cache_mod,
+                "yahoo_browser": types.SimpleNamespace(
+                    is_scope_error=lambda *_args, **_kwargs: False,
+                    write_method=lambda *_args, **_kwargs: None,
+                ),
+            },
+        )
+
+        class FakeTeam:
+            def roster(self):
+                return [
+                    {
+                        "player_id": 9,
+                        "name": "Ty France",
+                        "selected_position": "1B",
+                        "eligible_positions": ["1B", "Util"],
+                        "editorial_team_abbr": "MIN",
+                        "status": "",
+                    }
+                ]
+
+        module.get_league_context = lambda: (None, None, None, FakeTeam())
+
+        payload = module.cmd_roster(["false"], as_json=True)
+
+        self.assertEqual(enrich_calls, [])
+        self.assertEqual(payload["players"][0]["team"], "MIN")
+        self.assertEqual(payload["players"][0]["mlb_team"], "MIN")
+        self.assertEqual(payload["players"][0]["positions"], ["1B", "Util"])
+
     def test_league_settings_accept_string_roster_positions(self):
         shared = _shared_stub()
         shared.cache_get = lambda *_args, **_kwargs: None
@@ -620,6 +665,47 @@ class ReliabilityHardeningTests(unittest.TestCase):
         payload = api_module.api_hot_hand_free_agent_pitchers()
 
         self.assertEqual(payload, {"window": "Last 3 appearances", "players": []})
+
+    def test_best_available_skips_refresh_for_free_agent_list(self):
+        valuations_module = _module("valuations")
+        valuations_module.load_all = lambda: ([], [], "test")
+        valuations_module.get_player_by_name = lambda *_args, **_kwargs: []
+
+        draft_module = _load_script(
+            "draft_assistant_for_best_available_test",
+            "draft-assistant.py",
+            {
+                "yahoo_fantasy_api": _module("yahoo_fantasy_api"),
+                "valuations": valuations_module,
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: 77),
+                "shared": types.SimpleNamespace(
+                    enrich_with_intel=lambda *_args, **_kwargs: None,
+                    get_team_key=lambda *_args, **_kwargs: "422.l.1.t.7",
+                    get_connection=lambda *_args, **_kwargs: object(),
+                    LEAGUE_ID="422.l.1",
+                ),
+            },
+        )
+
+        refresh_calls = []
+
+        class FakeDraftAssistant:
+            def __init__(self):
+                pass
+
+            def refresh(self):
+                refresh_calls.append(True)
+
+            def get_available(self, pos_type, count):
+                self.last = (pos_type, count)
+                return [{"name": "Fast FA", "eligible_positions": ["OF"], "z_score": 2.75}]
+
+        draft_module.DraftAssistant = FakeDraftAssistant
+        payload = draft_module.cmd_best_available(["B", "1", "false"], as_json=True)
+
+        self.assertEqual(refresh_calls, [])
+        self.assertEqual(payload["players"][0]["name"], "Fast FA")
+        self.assertEqual(payload["players"][0]["z_score"], 2.75)
 
 
 if __name__ == "__main__":

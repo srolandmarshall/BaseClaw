@@ -56,8 +56,29 @@ def _eligible_positions(player):
     return []
 
 
+def _player_team_abbr(player):
+    """Normalize the player's MLB team abbreviation from Yahoo payloads."""
+    if not isinstance(player, dict):
+        return ""
+    for key in ("editorial_team_abbr", "team_abbr", "team"):
+        value = player.get(key, "")
+        if isinstance(value, str) and value:
+            return value
+        if isinstance(value, dict):
+            for subkey in ("abbr", "abbreviation", "shortName", "name"):
+                subval = value.get(subkey, "")
+                if subval:
+                    return str(subval)
+    return ""
+
+
+def _truthy(value):
+    return str(value).strip().lower() not in ("0", "false", "no", "off", "")
+
+
 def cmd_roster(args, as_json=False):
     """Show current roster"""
+    include_intel = _truthy(args[0]) if args else True
     sc, gm, lg, team = get_league_context()
     roster = team.roster()
 
@@ -70,17 +91,23 @@ def cmd_roster(args, as_json=False):
     if as_json:
         players = []
         for p in roster:
+            team_abbr = _player_team_abbr(p)
+            positions = _eligible_positions(p)
             players.append(
                 {
                     "name": _player_name(p),
                     "player_id": p.get("player_id", ""),
                     "position": _selected_position(p),
-                    "eligible_positions": _eligible_positions(p),
+                    "eligible_positions": positions,
+                    "positions": positions,
                     "status": p.get("status", ""),
+                    "team": team_abbr,
+                    "mlb_team": team_abbr,
                     "mlb_id": get_mlb_id(_player_name(p)),
                 }
             )
-        enrich_with_intel(players)
+        if include_intel:
+            enrich_with_intel(players)
         return {"players": players}
 
     print("Current Roster:")
