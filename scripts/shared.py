@@ -314,6 +314,59 @@ _LEAGUE_SETTINGS_NEGATIVE_TTL = 60  # seconds to cache empty result on API failu
 _league_settings_cache = {}
 
 
+_MLB_INJURIES_CACHE_TTL = int(os.environ.get("MLB_INJURIES_CACHE_TTL", "900"))
+_mlb_injuries_cache = {}
+
+
+def _is_mlb_injury_status(code, description):
+    text = (str(description or "") + " " + str(code or "")).lower()
+    if "injured" in text:
+        return True
+    if "day-to-day" in text or "day to day" in text:
+        return True
+    return False
+
+
+def fetch_mlb_injuries():
+    """Fetch league-wide MLB injuries from team rosters.
+
+    MLB Stats API no longer exposes a stable top-level /injuries route. Pull
+    each team's full roster and filter by injury-related status instead.
+    """
+    cached = cache_get(_mlb_injuries_cache, "injuries", _MLB_INJURIES_CACHE_TTL)
+    if cached is not None:
+        return cached
+
+    injuries = []
+    teams_data = mlb_fetch("/teams?sportId=1")
+    for team in teams_data.get("teams", []):
+        team_id = team.get("id")
+        team_name = team.get("name", "")
+        if not team_id:
+            continue
+        roster_data = mlb_fetch("/teams/" + str(team_id) + "/roster?rosterType=fullRoster&hydrate=person")
+        for entry in roster_data.get("roster", []):
+            status = entry.get("status", {}) if isinstance(entry, dict) else {}
+            description = status.get("description", "")
+            code = status.get("code", "")
+            if not _is_mlb_injury_status(code, description):
+                continue
+            person = entry.get("person", {}) if isinstance(entry, dict) else {}
+            player_name = person.get("fullName", "")
+            if not player_name:
+                continue
+            injuries.append({
+                "player": player_name,
+                "team": team_name,
+                "team_id": team_id,
+                "description": description or "Unknown",
+                "status": code,
+            })
+
+    cache_set(_mlb_injuries_cache, "injuries", injuries)
+    return injuries
+
+
 def normalize_team_details(team):
     """Return team.details() normalized to a flat dict."""
     raw = team.details() if hasattr(team, "details") else None

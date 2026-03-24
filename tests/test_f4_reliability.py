@@ -53,6 +53,7 @@ def _shared_stub():
     shared.get_trend_lookup = lambda *args, **kwargs: {}
     shared.enrich_with_intel = lambda *args, **kwargs: None
     shared.enrich_with_trends = lambda *args, **kwargs: None
+    shared.fetch_mlb_injuries = lambda *args, **kwargs: []
     shared.USER_AGENT = "test-agent"
     shared.reddit_get = lambda *args, **kwargs: {}
     shared.cache_get = lambda cache, key, ttl: (
@@ -75,6 +76,156 @@ class _FakeDataFrame:
 
 
 class ReliabilityHardeningTests(unittest.TestCase):
+    def test_roster_cmd_accepts_string_selected_position(self):
+        mlb_cache_mod = _module("mlb_id_cache")
+        mlb_cache_mod.get_mlb_id = lambda name, *args, **kwargs: "mlb-" + str(name)
+
+        module = _load_script(
+            "yahoo_fantasy_roster_script_for_test",
+            "yahoo-fantasy.py",
+            {
+                "shared": _shared_stub(),
+                "yahoo_fantasy_api": _module("yahoo_fantasy_api"),
+                "yahoo_oauth": types.SimpleNamespace(OAuth2=object),
+                "mlb_id_cache": mlb_cache_mod,
+                "yahoo_browser": types.SimpleNamespace(
+                    is_scope_error=lambda *_args, **_kwargs: False,
+                    write_method=lambda *_args, **_kwargs: None,
+                ),
+            },
+        )
+
+        class FakeTeam:
+            def roster(self):
+                return [
+                    {
+                        "player_id": 7,
+                        "name": "Ben Rice",
+                        "selected_position": "C",
+                        "eligible_positions": ["C", "1B", "Util"],
+                        "status": "",
+                    }
+                ]
+
+        module.get_league_context = lambda: (None, None, None, FakeTeam())
+
+        payload = module.cmd_roster([], as_json=True)
+
+        self.assertEqual(len(payload["players"]), 1)
+        self.assertEqual(payload["players"][0]["position"], "C")
+        self.assertEqual(payload["players"][0]["eligible_positions"], ["C", "1B", "Util"])
+        self.assertEqual(payload["players"][0]["mlb_id"], "mlb-Ben Rice")
+
+    def test_league_settings_accept_string_roster_positions(self):
+        shared = _shared_stub()
+        shared.cache_get = lambda *_args, **_kwargs: None
+        shared.cache_set = lambda cache, key, data: cache.__setitem__(key, (data, 0))
+
+        trace_utils_mod = _module("trace_utils")
+        trace_utils_mod.log_trace_event = lambda **_kwargs: None
+        trace_utils_mod.monotonic_ms = lambda: 1
+
+        module = _load_script(
+            "shared_script_for_test",
+            "shared.py",
+            {
+                "trace_utils": trace_utils_mod,
+                "yahoo_fantasy_api": _module("yahoo_fantasy_api"),
+                "yahoo_oauth": types.SimpleNamespace(OAuth2=object),
+            },
+        )
+
+        class FakeLeague:
+            def settings(self):
+                return {"scoring_type": "head", "num_teams": 12, "max_weekly_adds": 6}
+
+            def stat_categories(self):
+                return []
+
+            def positions(self):
+                return ["C", "1B", "BN"]
+
+        module.get_league = lambda: (None, None, FakeLeague())
+        module.get_team_key = lambda _lg=None: ""
+        module._league_settings_cache = {}
+
+        payload = module.get_league_settings()
+
+        self.assertEqual(
+            payload["roster_positions"],
+            [
+                {"position": "C", "count": 1, "position_type": ""},
+                {"position": "1B", "count": 1, "position_type": ""},
+                {"position": "BN", "count": 1, "position_type": ""},
+            ],
+        )
+
+    def test_fetch_mlb_injuries_uses_team_roster_statuses(self):
+        trace_utils_mod = _module("trace_utils")
+        trace_utils_mod.log_trace_event = lambda **_kwargs: None
+        trace_utils_mod.monotonic_ms = lambda: 1
+
+        module = _load_script(
+            "shared_injuries_script_for_test",
+            "shared.py",
+            {
+                "trace_utils": trace_utils_mod,
+                "yahoo_fantasy_api": _module("yahoo_fantasy_api"),
+                "yahoo_oauth": types.SimpleNamespace(OAuth2=object),
+            },
+        )
+
+        def fake_mlb_fetch(endpoint):
+            if endpoint == "/teams?sportId=1":
+                return {"teams": [{"id": 147, "name": "New York Yankees"}]}
+            if endpoint == "/teams/147/roster?rosterType=fullRoster&hydrate=person":
+                return {
+                    "roster": [
+                        {
+                            "person": {"fullName": "Healthy Guy"},
+                            "status": {"code": "A", "description": "Active"},
+                        },
+                        {
+                            "person": {"fullName": "Injured Guy"},
+                            "status": {"code": "D60", "description": "Injured 60-Day"},
+                        },
+                        {
+                            "person": {"fullName": "Day To Day Guy"},
+                            "status": {"code": "DTD", "description": "Day-To-Day"},
+                        },
+                        {
+                            "person": {"fullName": "Minors Guy"},
+                            "status": {"code": "RM", "description": "Reassigned to Minors"},
+                        },
+                    ]
+                }
+            return {}
+
+        module.mlb_fetch = fake_mlb_fetch
+        module._mlb_injuries_cache = {}
+
+        payload = module.fetch_mlb_injuries()
+
+        self.assertEqual(
+            payload,
+            [
+                {
+                    "player": "Injured Guy",
+                    "team": "New York Yankees",
+                    "team_id": 147,
+                    "description": "Injured 60-Day",
+                    "status": "D60",
+                },
+                {
+                    "player": "Day To Day Guy",
+                    "team": "New York Yankees",
+                    "team_id": 147,
+                    "description": "Day-To-Day",
+                    "status": "DTD",
+                },
+            ],
+        )
+
     def test_discover_cmd_uses_oauth_symbols_and_returns_league_payload(self):
         yahoo_mod = _module("yahoo_fantasy_api")
         yahoo_oauth_mod = _module("yahoo_oauth")
@@ -90,6 +241,10 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_fantasy_api": yahoo_mod,
                 "yahoo_oauth": yahoo_oauth_mod,
                 "mlb_id_cache": mlb_cache_mod,
+                "yahoo_browser": types.SimpleNamespace(
+                    is_scope_error=lambda *_args, **_kwargs: False,
+                    write_method=lambda *_args, **_kwargs: None,
+                ),
             },
         )
 

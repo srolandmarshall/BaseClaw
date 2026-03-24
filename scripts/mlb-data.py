@@ -5,7 +5,7 @@ import sys
 import json
 from datetime import date
 
-from shared import mlb_fetch as fetch
+from shared import mlb_fetch as fetch, fetch_mlb_injuries
 
 def cmd_teams(args, as_json=False):
     """List all MLB teams"""
@@ -139,19 +139,10 @@ def cmd_stats(args, as_json=False):
 
 def cmd_injuries(args, as_json=False):
     """Get current injuries"""
-    data = fetch("/injuries")
-    injuries = data.get("injuries", [])
+    injuries = fetch_mlb_injuries()
 
     if as_json:
-        result = []
-        for inj in injuries:
-            result.append({
-                "player": inj.get("player", {}).get("fullName", "?"),
-                "team": inj.get("team", {}).get("name", "?"),
-                "team_id": inj.get("team", {}).get("id", 0),
-                "description": inj.get("description", "?"),
-            })
-        return {"injuries": result}
+        return {"injuries": injuries}
 
     if not injuries:
         print("No injuries reported (may be offseason)")
@@ -159,8 +150,8 @@ def cmd_injuries(args, as_json=False):
 
     print("Current Injuries:")
     for inj in injuries:
-        player = inj.get("player", {}).get("fullName", "?")
-        team = inj.get("team", {}).get("name", "?")
+        player = inj.get("player", "?")
+        team = inj.get("team", "?")
         desc = inj.get("description", "?")
         print("  " + player + " (" + team + "): " + desc)
 

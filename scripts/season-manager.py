@@ -22,6 +22,7 @@ from shared import (
     get_league_settings,
     LEAGUE_ID, TEAM_ID, GAME_KEY, DATA_DIR,
     MLB_API, mlb_fetch, TEAM_ALIASES, normalize_team_name,
+    fetch_mlb_injuries,
     get_trend_lookup, enrich_with_intel, enrich_with_trends,
 )
 
@@ -719,13 +720,11 @@ def cmd_injury_report(args, as_json=False):
     # Get MLB injuries
     mlb_injuries = {}
     try:
-        data = mlb_fetch("/injuries")
-        for inj in data.get("injuries", []):
-            player_name = inj.get("player", {}).get("fullName", "")
+        for inj in fetch_mlb_injuries():
+            player_name = inj.get("player", "")
             if player_name:
                 mlb_injuries[player_name.lower()] = {
                     "description": inj.get("description", "Unknown"),
-                    "date": inj.get("date", ""),
                     "status": inj.get("status", ""),
                 }
     except Exception as e:
@@ -5095,13 +5094,11 @@ def cmd_il_stash_advisor(args, as_json=False):
     # Get MLB injuries for context
     mlb_injuries = {}
     try:
-        data = mlb_fetch("/injuries")
-        for inj in data.get("injuries", []):
-            player_name = inj.get("player", {}).get("fullName", "")
+        for inj in fetch_mlb_injuries():
+            player_name = inj.get("player", "")
             if player_name:
                 mlb_injuries[player_name.lower()] = {
                     "description": inj.get("description", "Unknown"),
-                    "date": inj.get("date", ""),
                     "status": inj.get("status", ""),
                 }
     except Exception as e:
