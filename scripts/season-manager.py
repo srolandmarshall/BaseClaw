@@ -120,7 +120,12 @@ def get_player_team(player):
 
 def get_player_position(player):
     """Get the selected position for a roster player"""
-    return player.get("selected_position", {}).get("position", "?")
+    raw = player.get("selected_position", "?")
+    if isinstance(raw, dict):
+        return str(raw.get("position", "?") or "?")
+    if isinstance(raw, str):
+        return raw or "?"
+    return str(raw or "?")
 
 
 def is_bench(player):
@@ -163,12 +168,14 @@ def get_roster_positions(lg):
     try:
         raw = lg.positions() if hasattr(lg, "positions") else None
         if raw:
-            # lg.positions() returns list of dicts:
-            # [{"position": "C", "count": 1, "position_type": "B"}, ...]
             positions = []
             for p in raw:
-                pos_name = p.get("position", "")
-                count = int(p.get("count", 1))
+                if isinstance(p, dict):
+                    pos_name = str(p.get("position", "") or "")
+                    count = int(p.get("count", 1))
+                else:
+                    pos_name = str(p or "")
+                    count = 1
                 for _ in range(count):
                     positions.append(pos_name)
             if positions:
@@ -3783,7 +3790,7 @@ def cmd_week_planner(args, as_json=False):
         for p in roster:
             name = p.get("name", "Unknown")
             positions = p.get("eligible_positions", [])
-            pos = p.get("selected_position", {}).get("position", "?")
+            pos = get_player_position(p)
             player_team = get_player_team(p)
             player_team_norm = normalize_team_name(player_team)
             # Also resolve alias to full name for matching
@@ -4326,7 +4333,7 @@ def cmd_roster_stats(args, as_json=False):
             for ps in (stats if isinstance(stats, list) else [stats]):
                 pid = str(ps.get("player_id", ""))
                 roster_entry = player_map.get(pid, {})
-                pos = roster_entry.get("selected_position", {}).get("position", "?")
+                pos = get_player_position(roster_entry)
                 pname = roster_entry.get("name", ps.get("name", "Unknown"))
                 results.append({
                     "name": pname,

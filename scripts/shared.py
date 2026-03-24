@@ -383,10 +383,18 @@ def get_league_settings():
             raw_pos = lg.positions() if hasattr(lg, "positions") else None
             if raw_pos:
                 for rp in raw_pos:
+                    if isinstance(rp, dict):
+                        position = str(rp.get("position", "") or "")
+                        count = int(rp.get("count", 1))
+                        position_type = str(rp.get("position_type", "") or "")
+                    else:
+                        position = str(rp or "")
+                        count = 1
+                        position_type = ""
                     roster_positions.append({
-                        "position": rp.get("position", ""),
-                        "count": int(rp.get("count", 1)),
-                        "position_type": rp.get("position_type", ""),
+                        "position": position,
+                        "count": count,
+                        "position_type": position_type,
                     })
         except Exception as e:
             print("Warning: could not fetch roster positions: " + str(e))

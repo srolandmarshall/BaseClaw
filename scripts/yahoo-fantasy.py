@@ -16,6 +16,46 @@ from shared import (
 )
 
 
+def _player_name(player):
+    """Extract a stable display name from Yahoo player payloads."""
+    if not isinstance(player, dict):
+        return "Unknown"
+    name = player.get("name", "Unknown")
+    if isinstance(name, dict):
+        full = name.get("full", "").strip()
+        if full:
+            return full
+        first = name.get("first", "").strip()
+        last = name.get("last", "").strip()
+        combined = (first + " " + last).strip()
+        return combined or "Unknown"
+    return str(name or "Unknown")
+
+
+def _selected_position(player):
+    """Yahoo may return selected_position as a string or nested dict."""
+    if not isinstance(player, dict):
+        return "?"
+    raw = player.get("selected_position", "?")
+    if isinstance(raw, dict):
+        return str(raw.get("position", "?") or "?")
+    if isinstance(raw, str):
+        return raw or "?"
+    return str(raw or "?")
+
+
+def _eligible_positions(player):
+    """Normalize eligible positions to a string list."""
+    if not isinstance(player, dict):
+        return []
+    raw = player.get("eligible_positions", [])
+    if isinstance(raw, list):
+        return [str(pos) for pos in raw if str(pos)]
+    if isinstance(raw, str):
+        return [raw] if raw else []
+    return []
+
+
 def cmd_roster(args, as_json=False):
     """Show current roster"""
     sc, gm, lg, team = get_league_context()
@@ -32,12 +72,12 @@ def cmd_roster(args, as_json=False):
         for p in roster:
             players.append(
                 {
-                    "name": p.get("name", "Unknown"),
+                    "name": _player_name(p),
                     "player_id": p.get("player_id", ""),
-                    "position": p.get("selected_position", {}).get("position", "?"),
-                    "eligible_positions": p.get("eligible_positions", []),
+                    "position": _selected_position(p),
+                    "eligible_positions": _eligible_positions(p),
                     "status": p.get("status", ""),
-                    "mlb_id": get_mlb_id(p.get("name", "")),
+                    "mlb_id": get_mlb_id(_player_name(p)),
                 }
             )
         enrich_with_intel(players)
@@ -45,10 +85,10 @@ def cmd_roster(args, as_json=False):
 
     print("Current Roster:")
     for p in roster:
-        pos = p.get("selected_position", {}).get("position", "?")
-        name = p.get("name", "Unknown")
+        pos = _selected_position(p)
+        name = _player_name(p)
         status = p.get("status", "")
-        elig = ",".join(p.get("eligible_positions", []))
+        elig = ",".join(_eligible_positions(p))
         line = "  " + pos.ljust(4) + " " + name.ljust(25) + " " + elig
         if status:
             line += " [" + status + "]"
@@ -1782,21 +1822,21 @@ def cmd_roster_history(args, as_json=False):
             players = []
             for p in roster:
                 players.append({
-                    "name": p.get("name", "Unknown"),
+                    "name": _player_name(p),
                     "player_id": str(p.get("player_id", "")),
-                    "position": p.get("selected_position", {}).get("position", "?"),
-                    "eligible_positions": p.get("eligible_positions", []),
+                    "position": _selected_position(p),
+                    "eligible_positions": _eligible_positions(p),
                     "status": p.get("status", ""),
-                    "mlb_id": get_mlb_id(p.get("name", "")),
+                    "mlb_id": get_mlb_id(_player_name(p)),
                 })
             return {"players": players, "lookup": lookup, "label": label}
 
         print("Roster for " + label + ":")
         for p in roster:
-            pos = p.get("selected_position", {}).get("position", "?")
-            pname = p.get("name", "Unknown")
+            pos = _selected_position(p)
+            pname = _player_name(p)
             status = p.get("status", "")
-            elig = ",".join(p.get("eligible_positions", []))
+            elig = ",".join(_eligible_positions(p))
             line = "  " + pos.ljust(4) + " " + pname.ljust(25) + " " + elig
             if status:
                 line += " [" + status + "]"
