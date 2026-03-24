@@ -295,6 +295,40 @@ def _operator_inning_display(game):
     return detailed or abstract or ""
 
 
+def _operator_game_time(game):
+    game_date = str(game.get("gameDate", "") or "")
+    if not game_date:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(game_date.replace("Z", "+00:00"))
+        return parsed.astimezone().isoformat()
+    except ValueError:
+        return ""
+
+
+def _operator_status_sort_bucket(status):
+    token = str(status or "").strip().lower()
+    if token in {"in progress", "manager challenge", "review", "warmup", "delayed start", "delayed", "game advisory"}:
+        return 0
+    if token in {"pre-game", "scheduled"}:
+        return 1
+    if token in {"final", "game over", "completed early"}:
+        return 2
+    return 3
+
+
+def _operator_sort_games(games):
+    def _sort_key(game):
+        return (
+            -_safe_int(game.get("total_relevant_count"), 0),
+            _operator_status_sort_bucket(game.get("status")),
+            str(game.get("game_time", "") or ""),
+            str(game.get("game_id", "") or ""),
+        )
+
+    return sorted(games, key=_sort_key)
+
+
 def _operator_team_abbr_map(mlb_fetch):
     lookup = {}
     data = mlb_fetch("/teams?sportId=1")
@@ -328,6 +362,7 @@ def _operator_normalize_game(game, abbr_lookup, my_team_name, opponent_team_name
         "game_id": "mlb-" + str(game.get("gamePk", "")),
         "status": str(game.get("status", {}).get("detailedState", "") or ""),
         "inning": _operator_inning_display(game),
+        "game_time": _operator_game_time(game),
         "away_team": {
             "name": away_name,
             "abbr": away_abbr,
@@ -516,7 +551,7 @@ def _operator_scoreboard_payload():
     return {
         "date": scoreboard_date,
         "generated_at": _operator_generated_at(),
-        "games": games,
+        "games": _operator_sort_games(games),
     }
 
 

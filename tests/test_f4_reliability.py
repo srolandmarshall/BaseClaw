@@ -823,10 +823,12 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(payload["date"], "2026-03-24")
         self.assertIn("generated_at", payload)
         self.assertEqual(len(payload["games"]), 3)
+        self.assertEqual([game["game_id"] for game in payload["games"]], ["mlb-11", "mlb-22", "mlb-33"])
 
         live_game = next(game for game in payload["games"] if game["game_id"] == "mlb-11")
         self.assertEqual(live_game["status"], "In Progress")
         self.assertEqual(live_game["inning"], "Top 6th")
+        self.assertTrue(live_game["game_time"].endswith("+00:00") or "T" in live_game["game_time"])
         self.assertEqual(live_game["away_team"]["abbr"], "NYY")
         self.assertEqual(live_game["home_team"]["abbr"], "BOS")
         self.assertEqual(live_game["my_team_name"], "Marsh'n Monsters")
@@ -920,6 +922,7 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
         self.assertEqual(payload["date"], "2026-03-24")
         self.assertEqual(len(payload["games"]), 1)
+        self.assertIn("game_time", payload["games"][0])
         self.assertEqual(payload["games"][0]["total_relevant_count"], 0)
         self.assertEqual(payload["games"][0]["my_players"], [])
         self.assertEqual(payload["games"][0]["opp_players"], [])
