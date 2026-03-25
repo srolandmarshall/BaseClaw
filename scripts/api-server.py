@@ -8,6 +8,8 @@ import sys
 import os
 import importlib
 import time
+import json
+import hashlib
 from datetime import date, datetime, timezone
 from mlb_id_cache import get_mlb_id
 
@@ -47,11 +49,27 @@ import draft_sim
 
 app = Flask(__name__)
 _DASHBOARD_CACHE = {}
+_DASHBOARD_CACHE_DIR = os.path.join(os.environ.get("DATA_DIR", "/app/data"), "dashboard-cache")
+
+
+def _dashboard_cache_file(key):
+    prefix = str(key[0] if isinstance(key, tuple) and key else key).replace("/", "_")
+    digest = hashlib.sha1(json.dumps(key, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:16]
+    return os.path.join(_DASHBOARD_CACHE_DIR, prefix + "-" + digest + ".json")
 
 
 def _dashboard_cache_get(key, ttl_seconds):
     entry = _DASHBOARD_CACHE.get(key)
     if not entry:
+        path = _dashboard_cache_file(key)
+        try:
+            if os.path.exists(path) and time.time() - os.path.getmtime(path) <= ttl_seconds:
+                with open(path) as handle:
+                    payload = json.load(handle)
+                _DASHBOARD_CACHE[key] = (payload, time.time())
+                return payload
+        except Exception:
+            return None
         return None
     payload, ts = entry
     if time.time() - ts > ttl_seconds:
@@ -62,6 +80,27 @@ def _dashboard_cache_get(key, ttl_seconds):
 
 def _dashboard_cache_set(key, payload):
     _DASHBOARD_CACHE[key] = (payload, time.time())
+    path = _dashboard_cache_file(key)
+    try:
+        os.makedirs(_DASHBOARD_CACHE_DIR, exist_ok=True)
+        with open(path, "w") as handle:
+            json.dump(payload, handle)
+    except Exception:
+        pass
+
+
+def _dashboard_cache_delete_prefix(prefix):
+    for key in list(_DASHBOARD_CACHE.keys()):
+        if isinstance(key, tuple) and key and key[0] == prefix:
+            _DASHBOARD_CACHE.pop(key, None)
+    try:
+        if not os.path.isdir(_DASHBOARD_CACHE_DIR):
+            return
+        for filename in os.listdir(_DASHBOARD_CACHE_DIR):
+            if filename.startswith(str(prefix).replace("/", "_") + "-"):
+                os.remove(os.path.join(_DASHBOARD_CACHE_DIR, filename))
+    except Exception:
+        pass
 
 
 def _safe_int(value, default=None):
@@ -1603,9 +1642,19 @@ def api_lineup_optimize():
     try:
         args = []
         apply_flag = request.args.get("apply", "false")
+        include_intel = _safe_bool(request.args.get("include_intel", "false"))
+        if apply_flag.lower() != "true":
+            cache_key = ("lineup-optimize", date.today().isoformat(), bool(include_intel))
+            cached = _dashboard_cache_get(cache_key, 60)
+            if cached is not None:
+                return jsonify(cached)
         if apply_flag.lower() == "true":
             args.append("--apply")
-        result = season_manager.cmd_lineup_optimize(args, as_json=True)
+        result = season_manager.cmd_lineup_optimize(args, as_json=True, include_intel=include_intel)
+        if apply_flag.lower() == "true":
+            _dashboard_cache_delete_prefix("lineup-optimize")
+        else:
+            _dashboard_cache_set(cache_key, result)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500

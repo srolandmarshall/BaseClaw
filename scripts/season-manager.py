@@ -320,7 +320,7 @@ def analyze_schedule_density(team_name, days=14):
 # ---------- Commands ----------
 
 
-def cmd_lineup_optimize(args, as_json=False):
+def cmd_lineup_optimize(args, as_json=False, include_intel=True):
     """Cross-reference roster with MLB schedule to find off-day players"""
     apply_changes = "--apply" in args
 
@@ -440,7 +440,8 @@ def cmd_lineup_optimize(args, as_json=False):
         bench_playing_info = [_player_info_with_tier(p) for p in bench_playing]
         il_players_info = [_player_info_with_tier(p) for p in il_players]
         all_players = active_off_day_info + bench_playing_info + il_players_info
-        enrich_with_intel(all_players)
+        if include_intel and all_players:
+            enrich_with_intel(all_players)
         return {
             "games_today": len(schedule),
             "active_off_day": active_off_day_info,

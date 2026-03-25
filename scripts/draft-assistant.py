@@ -11,7 +11,6 @@ import os
 import importlib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import yahoo_fantasy_api as yfa
-from valuations import load_all, get_player_by_name
 from mlb_id_cache import get_mlb_id
 from shared import enrich_with_intel, get_team_key, get_connection, LEAGUE_ID
 
@@ -40,6 +39,60 @@ def _best_available_cache_get(key):
 def _best_available_cache_set(key, value):
     _BEST_AVAILABLE_CACHE[key] = (value, time.time())
 
+
+def _normalize_player_name(name):
+    return str(name or "").strip().lower()
+
+
+def _build_z_lookup(df):
+    lookup = {}
+    if df is None or len(df) == 0:
+        return lookup
+    for _, row in df.iterrows():
+        name_key = _normalize_player_name(row.get("Name", ""))
+        if not name_key or name_key in lookup:
+            continue
+        z_score = row.get("Z_Final")
+        lookup[name_key] = float(z_score) if z_score is not None else None
+    return lookup
+
+
+def _get_cached_valuation_lookups():
+    from valuations import get_loaded_valuations
+
+    hitters, pitchers, source = get_loaded_valuations()
+    return {
+        "B": _build_z_lookup(hitters),
+        "P": _build_z_lookup(pitchers),
+        "source": source,
+    }
+
+
+def _rank_available_players(pos_type, limit):
+    lookups = _get_cached_valuation_lookups()
+    available = _yahoo_fantasy.get_available_players(pos_type, None)
+    ranked = []
+    for player in available or []:
+        if not isinstance(player, dict):
+            continue
+        name = player.get("name", "")
+        z_score = lookups.get(pos_type, {}).get(_normalize_player_name(name))
+        row = dict(player)
+        row["z_score"] = z_score
+        ranked.append(row)
+
+    has_z = any(player.get("z_score") is not None for player in ranked)
+    if has_z:
+        ranked.sort(
+            key=lambda player: (
+                player.get("z_score") is None,
+                -(player.get("z_score") or -999.0),
+                -(float(player.get("percent_owned", 0) or 0)),
+                player.get("name", ""),
+            )
+        )
+    return ranked[:limit]
+
 class DraftAssistant:
     def __init__(self):
         self.sc = get_connection()
@@ -56,32 +109,28 @@ class DraftAssistant:
         self._val_hitters = None
         self._val_pitchers = None
         self._val_source = None
+        self._z_lookup_hitters = {}
+        self._z_lookup_pitchers = {}
         self._load_valuations()
 
     def _load_valuations(self):
         """Load z-score valuations from the valuation engine"""
         try:
-            h, p, source = load_all()
+            from valuations import get_loaded_valuations
+
+            h, p, source = get_loaded_valuations()
             self._val_hitters = h
             self._val_pitchers = p
             self._val_source = source
+            self._z_lookup_hitters = _build_z_lookup(h)
+            self._z_lookup_pitchers = _build_z_lookup(p)
         except Exception as e:
             print("Note: valuations unavailable (" + str(e) + ")")
 
     def _get_zscore(self, player_name, pos_type="B"):
         """Look up a player's z-score by name"""
-        if pos_type == "B":
-            df = self._val_hitters
-        else:
-            df = self._val_pitchers
-        if df is None or len(df) == 0:
-            return None
-        matches = get_player_by_name(player_name,
-                                      self._val_hitters if pos_type == "B" else None,
-                                      self._val_pitchers if pos_type == "P" else None)
-        if matches:
-            return matches[0].get("Z_Final", None)
-        return None
+        lookup = self._z_lookup_hitters if pos_type == "B" else self._z_lookup_pitchers
+        return lookup.get(_normalize_player_name(player_name))
 
     def refresh(self):
         """Refresh draft state"""
@@ -393,8 +442,13 @@ def cmd_best_available(args, as_json=False):
         if cached is not None:
             return cached
 
-    da = DraftAssistant()
-    available = da.get_available(pos_type, count)
+    try:
+        available = _rank_available_players(pos_type, count)
+    except Exception:
+        available = []
+    if not available:
+        da = DraftAssistant()
+        available = da.get_available(pos_type, count)
 
     if as_json:
         players = []

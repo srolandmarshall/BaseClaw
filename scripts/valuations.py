@@ -946,6 +946,11 @@ def _get_loaded_data():
     return h, p, s
 
 
+def get_loaded_valuations():
+    """Public wrapper for callers that need cached valuation DataFrames."""
+    return _get_loaded_data()
+
+
 def get_player_zscore(player_name):
     """Look up a player's z-score breakdown and tier.
     Returns dict with z_total, z_final, tier, per_category_zscores, rank, pos, type.

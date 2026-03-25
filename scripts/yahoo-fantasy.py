@@ -4,6 +4,7 @@
 import sys
 import json
 import os
+import time
 import datetime
 import importlib
 import yahoo_fantasy_api as yfa
@@ -15,6 +16,10 @@ from shared import (
     OAUTH_FILE, LEAGUE_ID, TEAM_ID, GAME_KEY, DATA_DIR,
     enrich_with_intel, enrich_with_trends,
 )
+
+_AVAILABLE_PLAYERS_CACHE = {}
+_AVAILABLE_PLAYERS_CACHE_TTL = int(os.environ.get("AVAILABLE_PLAYERS_CACHE_TTL_SECONDS", "90"))
+_AVAILABLE_PLAYERS_SNAPSHOT_TTL = int(os.environ.get("AVAILABLE_PLAYERS_SNAPSHOT_TTL_SECONDS", "300"))
 
 
 def _player_name(player):
@@ -111,11 +116,56 @@ def _normalize_available_player(player, availability_type):
     }
 
 
+def _available_players_snapshot_path(pos_type):
+    return os.path.join(DATA_DIR, "available-players-" + str(pos_type or "B").upper() + ".json")
+
+
+def _read_available_players_snapshot(pos_type):
+    path = _available_players_snapshot_path(pos_type)
+    if not os.path.exists(path):
+        return None
+    try:
+        age_seconds = time.time() - os.path.getmtime(path)
+        if age_seconds > _AVAILABLE_PLAYERS_SNAPSHOT_TTL:
+            return None
+        with open(path) as handle:
+            payload = json.load(handle)
+        if isinstance(payload, list):
+            return payload
+    except Exception:
+        return None
+    return None
+
+
+def _write_available_players_snapshot(pos_type, players):
+    path = _available_players_snapshot_path(pos_type)
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(path, "w") as handle:
+            json.dump(players, handle)
+    except Exception:
+        pass
+
+
 def get_available_players(pos_type="B", count=None):
     """Return available players from waivers plus true free agents."""
-    sc, gm, lg = get_league()
     pos_type = str(pos_type or "B").upper()
     limit = int(count) if count else None
+    now = time.time()
+
+    cached = _AVAILABLE_PLAYERS_CACHE.get(pos_type)
+    if cached and now - cached[1] <= _AVAILABLE_PLAYERS_CACHE_TTL:
+        players = list(cached[0])
+        return players[:limit] if limit is not None else players
+
+    if LEAGUE_ID:
+        snapshot = _read_available_players_snapshot(pos_type)
+        if snapshot is not None:
+            _AVAILABLE_PLAYERS_CACHE[pos_type] = (list(snapshot), now)
+            players = list(snapshot)
+            return players[:limit] if limit is not None else players
+
+    sc, gm, lg = get_league()
 
     combined = {}
 
@@ -169,6 +219,9 @@ def get_available_players(pos_type="B", count=None):
             p.get("name", ""),
         )
     )
+    _AVAILABLE_PLAYERS_CACHE[pos_type] = (list(players), now)
+    if LEAGUE_ID:
+        _write_available_players_snapshot(pos_type, players)
     if limit is not None:
         players = players[:limit]
     return players
