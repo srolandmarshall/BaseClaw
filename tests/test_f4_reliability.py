@@ -880,6 +880,53 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(empty_game["my_players"], [])
         self.assertEqual(empty_game["opp_players"], [])
 
+    def test_operator_scoreboard_endpoint_filters_single_game(self):
+        api_module = _load_script(
+            "api_server_operator_scoreboard_filter_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        api_module._DASHBOARD_CACHE = {}
+        api_module.request.args = {"game_id": "mlb-22"}
+        api_module._operator_scoreboard_payload = lambda: {
+            "date": "2026-03-24",
+            "generated_at": "2026-03-24T16:00:00Z",
+            "games": [
+                {"game_id": "mlb-11", "status": "In Progress"},
+                {"game_id": "mlb-22", "status": "Scheduled"},
+            ],
+        }
+
+        class FakeDate:
+            @staticmethod
+            def today():
+                return date(2026, 3, 24)
+
+        with patch.object(api_module, "date", FakeDate):
+            payload = api_module.api_operator_scoreboard()
+
+        self.assertEqual(payload["date"], "2026-03-24")
+        self.assertEqual(payload["generated_at"], "2026-03-24T16:00:00Z")
+        self.assertEqual(payload["games"], [{"game_id": "mlb-22", "status": "Scheduled"}])
+
     def test_operator_scoreboard_endpoint_degrades_when_fantasy_linkage_fails(self):
         shared_module = _shared_stub()
         shared_module.mlb_fetch = lambda endpoint, *_args, **_kwargs: (
@@ -958,6 +1005,64 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(payload["games"][0]["opp_players"], [])
         self.assertEqual(payload["games"][0]["my_team_name"], "")
         self.assertEqual(payload["games"][0]["opponent_team_name"], "")
+
+    def test_operator_live_state_normalizes_mid_inning_transitions(self):
+        api_module = _load_script(
+            "api_server_operator_live_state_mid_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        game = {
+            "status": {"abstractGameState": "Live", "detailedState": "In Progress"},
+            "linescore": {
+                "inningState": "Middle",
+                "currentInning": 7,
+                "outs": 3,
+                "balls": 2,
+                "strikes": 1,
+                "offense": {
+                    "first": {"id": 1},
+                    "batter": {"fullName": "Should Clear"},
+                },
+                "defense": {
+                    "pitcher": {"fullName": "Should Also Clear"},
+                },
+            },
+        }
+
+        payload = api_module._operator_live_state(game, "NYY", "BOS")
+
+        self.assertEqual(
+            payload,
+            {
+                "inning_half": "Mid",
+                "inning_number": 7,
+                "outs": 3,
+                "balls": None,
+                "strikes": None,
+                "bases": {"first": False, "second": False, "third": False},
+                "batter": {"name": "", "team_abbr": ""},
+                "pitcher": {"name": "", "team_abbr": ""},
+            },
+        )
 
     def test_best_available_skips_refresh_for_free_agent_list(self):
         valuations_module = _module("valuations")

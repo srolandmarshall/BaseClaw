@@ -387,6 +387,15 @@ def _operator_live_state(game, away_abbr, home_abbr):
         batter_team_abbr = ""
         pitcher_team_abbr = ""
 
+    if inning_half in {"Mid", "End"}:
+        balls = None
+        strikes = None
+        offense = {}
+        batter = {}
+        pitcher = {}
+        batter_team_abbr = ""
+        pitcher_team_abbr = ""
+
     has_live_markers = any(
         value is not None and value != ""
         for value in (inning_half, inning_number, outs, balls, strikes)
@@ -1170,12 +1179,27 @@ def api_scoreboard():
 @app.route("/api/operator-scoreboard")
 def api_operator_scoreboard():
     cache_key = ("operator-scoreboard", date.today().isoformat())
+    requested_game_id = str(request.args.get("game_id", "") or "").strip()
     cached = _dashboard_cache_get(cache_key, 30)
     if cached is not None:
+        if requested_game_id:
+            filtered = dict(cached)
+            filtered["games"] = [
+                game for game in (cached.get("games") or [])
+                if str(game.get("game_id", "") or "") == requested_game_id
+            ]
+            return jsonify(filtered)
         return jsonify(cached)
     try:
         result = _operator_scoreboard_payload()
         _dashboard_cache_set(cache_key, result)
+        if requested_game_id:
+            filtered = dict(result)
+            filtered["games"] = [
+                game for game in (result.get("games") or [])
+                if str(game.get("game_id", "") or "") == requested_game_id
+            ]
+            return jsonify(filtered)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
