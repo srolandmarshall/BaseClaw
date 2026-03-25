@@ -306,6 +306,19 @@ def _operator_game_time(game):
         return ""
 
 
+def _operator_normalize_inning_half(value):
+    token = str(value or "").strip().lower()
+    if token.startswith("top"):
+        return "Top"
+    if token.startswith("bottom") or token.startswith("bot"):
+        return "Bottom"
+    if token.startswith("mid"):
+        return "Mid"
+    if token.startswith("end"):
+        return "End"
+    return ""
+
+
 def _operator_status_sort_bucket(status):
     token = str(status or "").strip().lower()
     if token in {"in progress", "manager challenge", "review", "warmup", "delayed start", "delayed", "game advisory"}:
@@ -343,6 +356,69 @@ def _operator_team_abbr_map(mlb_fetch):
     return lookup
 
 
+def _operator_live_state(game, away_abbr, home_abbr):
+    status = game.get("status", {}) if isinstance(game, dict) else {}
+    abstract = str(status.get("abstractGameState", "") or "").strip().lower()
+    linescore = game.get("linescore", {}) if isinstance(game, dict) else {}
+    if not isinstance(linescore, dict) or not linescore:
+        return None
+
+    inning_half = _operator_normalize_inning_half(
+        linescore.get("inningHalf") or linescore.get("inningState")
+    )
+    inning_number = _safe_int(linescore.get("currentInning"), None)
+    outs = _safe_int(linescore.get("outs"), None)
+    balls = _safe_int(linescore.get("balls"), None)
+    strikes = _safe_int(linescore.get("strikes"), None)
+
+    offense = linescore.get("offense", {}) if isinstance(linescore.get("offense"), dict) else {}
+    defense = linescore.get("defense", {}) if isinstance(linescore.get("defense"), dict) else {}
+
+    batter = offense.get("batter", {}) if isinstance(offense.get("batter"), dict) else {}
+    pitcher = defense.get("pitcher", {}) if isinstance(defense.get("pitcher"), dict) else {}
+
+    if inning_half == "Top":
+        batter_team_abbr = away_abbr
+        pitcher_team_abbr = home_abbr
+    elif inning_half == "Bottom":
+        batter_team_abbr = home_abbr
+        pitcher_team_abbr = away_abbr
+    else:
+        batter_team_abbr = ""
+        pitcher_team_abbr = ""
+
+    has_live_markers = any(
+        value is not None and value != ""
+        for value in (inning_half, inning_number, outs, balls, strikes)
+    ) or any(key in offense for key in ("first", "second", "third", "batter")) or any(
+        key in defense for key in ("pitcher",)
+    )
+
+    if abstract != "live" and not has_live_markers:
+        return None
+
+    return {
+        "inning_half": inning_half or None,
+        "inning_number": inning_number,
+        "outs": outs,
+        "balls": balls,
+        "strikes": strikes,
+        "bases": {
+            "first": bool(offense.get("first")),
+            "second": bool(offense.get("second")),
+            "third": bool(offense.get("third")),
+        },
+        "batter": {
+            "name": str(batter.get("fullName", "") or batter.get("name", "") or ""),
+            "team_abbr": batter_team_abbr,
+        },
+        "pitcher": {
+            "name": str(pitcher.get("fullName", "") or pitcher.get("name", "") or ""),
+            "team_abbr": pitcher_team_abbr,
+        },
+    }
+
+
 def _operator_normalize_game(game, abbr_lookup, my_team_name, opponent_team_name):
     teams = game.get("teams", {}) if isinstance(game, dict) else {}
     away = teams.get("away", {}) if isinstance(teams, dict) else {}
@@ -358,7 +434,7 @@ def _operator_normalize_game(game, abbr_lookup, my_team_name, opponent_team_name
     away_abbr = str(away_team.get("abbreviation", "") or "") or abbr_lookup.get(str(away_id), "") or abbr_lookup.get(away_name.lower(), "")
     home_abbr = str(home_team.get("abbreviation", "") or "") or abbr_lookup.get(str(home_id), "") or abbr_lookup.get(home_name.lower(), "")
 
-    return {
+    normalized = {
         "game_id": "mlb-" + str(game.get("gamePk", "")),
         "status": str(game.get("status", {}).get("detailedState", "") or ""),
         "inning": _operator_inning_display(game),
@@ -383,6 +459,10 @@ def _operator_normalize_game(game, abbr_lookup, my_team_name, opponent_team_name
         "my_players": [],
         "opp_players": [],
     }
+    live_state = _operator_live_state(game, away_abbr, home_abbr)
+    if live_state is not None:
+        normalized["live_state"] = live_state
+    return normalized
 
 
 def _operator_extract_current_matchup(lg):

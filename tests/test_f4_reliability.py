@@ -691,7 +691,22 @@ class ReliabilityHardeningTests(unittest.TestCase):
                                     "gamePk": 11,
                                     "gameDate": "2026-03-24T23:10:00Z",
                                     "status": {"abstractGameState": "Live", "detailedState": "In Progress"},
-                                    "linescore": {"inningHalf": "Top", "currentInningOrdinal": "6th"},
+                                    "linescore": {
+                                        "inningHalf": "Top",
+                                        "currentInningOrdinal": "6th",
+                                        "currentInning": 6,
+                                        "outs": 1,
+                                        "balls": 2,
+                                        "strikes": 1,
+                                        "offense": {
+                                            "first": {"id": 1},
+                                            "third": {"id": 3},
+                                            "batter": {"fullName": "Aaron Judge"},
+                                        },
+                                        "defense": {
+                                            "pitcher": {"fullName": "Garrett Crochet"},
+                                        },
+                                    },
                                     "teams": {
                                         "away": {"score": 4, "team": {"id": 10, "name": "New York Yankees"}},
                                         "home": {"score": 2, "team": {"id": 11, "name": "Boston Red Sox"}},
@@ -829,6 +844,19 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(live_game["status"], "In Progress")
         self.assertEqual(live_game["inning"], "Top 6th")
         self.assertTrue(live_game["game_time"].endswith("+00:00") or "T" in live_game["game_time"])
+        self.assertEqual(
+            live_game["live_state"],
+            {
+                "inning_half": "Top",
+                "inning_number": 6,
+                "outs": 1,
+                "balls": 2,
+                "strikes": 1,
+                "bases": {"first": True, "second": False, "third": True},
+                "batter": {"name": "Aaron Judge", "team_abbr": "NYY"},
+                "pitcher": {"name": "Garrett Crochet", "team_abbr": "BOS"},
+            },
+        )
         self.assertEqual(live_game["away_team"]["abbr"], "NYY")
         self.assertEqual(live_game["home_team"]["abbr"], "BOS")
         self.assertEqual(live_game["my_team_name"], "Marsh'n Monsters")
@@ -842,6 +870,7 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(live_game["opp_players"][0]["fantasy_position"], "Util")
 
         scheduled_game = next(game for game in payload["games"] if game["game_id"] == "mlb-22")
+        self.assertNotIn("live_state", scheduled_game)
         self.assertEqual(scheduled_game["my_inactive_count"], 1)
         self.assertEqual(scheduled_game["opp_inactive_count"], 1)
         self.assertEqual(scheduled_game["total_relevant_count"], 2)
@@ -923,6 +952,7 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(payload["date"], "2026-03-24")
         self.assertEqual(len(payload["games"]), 1)
         self.assertIn("game_time", payload["games"][0])
+        self.assertNotIn("live_state", payload["games"][0])
         self.assertEqual(payload["games"][0]["total_relevant_count"], 0)
         self.assertEqual(payload["games"][0]["my_players"], [])
         self.assertEqual(payload["games"][0]["opp_players"], [])
