@@ -30,6 +30,6 @@ primary_region = 'iad'
     path = '/health'
 
 [[vm]]
-  memory = '2048'
+  memory = '1024'
   cpu_kind = 'shared'
   cpus = 1
