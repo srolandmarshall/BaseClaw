@@ -860,13 +860,17 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(live_game["opp_inactive_count"], 0)
         self.assertEqual(live_game["total_relevant_count"], 2)
         self.assertEqual(live_game["my_players"][0]["slot_status"], "active")
+        self.assertEqual(live_game["my_players"][0]["team_abbr"], "NYY")
         self.assertEqual(live_game["opp_players"][0]["fantasy_position"], "Util")
+        self.assertEqual(live_game["opp_players"][0]["team_abbr"], "BOS")
 
         scheduled_game = next(game for game in payload["games"] if game["game_id"] == "mlb-22")
         self.assertNotIn("live_state", scheduled_game)
         self.assertEqual(scheduled_game["my_inactive_count"], 1)
         self.assertEqual(scheduled_game["opp_inactive_count"], 1)
         self.assertEqual(scheduled_game["total_relevant_count"], 2)
+        self.assertEqual(scheduled_game["my_players"][0]["team_abbr"], "CHC")
+        self.assertEqual(scheduled_game["opp_players"][0]["team_abbr"], "LAD")
 
         empty_game = next(game for game in payload["games"] if game["game_id"] == "mlb-33")
         self.assertEqual(empty_game["total_relevant_count"], 0)

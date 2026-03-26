@@ -752,6 +752,7 @@ def _operator_rows_by_team(rows):
         by_team.setdefault(team_abbr, []).append(
             {
                 "name": row.get("name", ""),
+                "team_abbr": team_abbr,
                 "slot_status": row.get("slot_status", "active"),
                 "fantasy_position": row.get("fantasy_position", ""),
             }
