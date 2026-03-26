@@ -10,6 +10,7 @@ import importlib
 import time
 import json
 import hashlib
+import urllib.request
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 from mlb_id_cache import get_mlb_id
@@ -52,6 +53,7 @@ app = Flask(__name__)
 _DASHBOARD_CACHE = {}
 _DASHBOARD_CACHE_DIR = os.path.join(os.environ.get("DATA_DIR", "/app/data"), "dashboard-cache")
 _OPERATOR_SCOREBOARD_TZ = ZoneInfo("America/New_York")
+_MLB_MEDIA_GATEWAY_URL = "https://media-gateway.mlb.com/graphql"
 
 
 def _dashboard_cache_file(key):
@@ -743,6 +745,120 @@ def _operator_fill_missing_team_abbr(rows, mlb_fetch, abbr_lookup):
             row["team_abbr"] = resolved
 
 
+def _operator_game_pk_from_game_id(game_id):
+    token = str(game_id or "").strip()
+    if token.startswith("mlb-"):
+        token = token[4:]
+    return token if token.isdigit() else ""
+
+
+def _mlb_media_feed_sort_key(feed):
+    feed_type = str(feed.get("feedType", "") or "").upper()
+    if feed_type == "HOME":
+        return (0, str(feed.get("callSign", "") or ""))
+    if feed_type == "AWAY":
+        return (1, str(feed.get("callSign", "") or ""))
+    if feed_type == "NETWORK":
+        return (2, str(feed.get("callSign", "") or ""))
+    return (3, str(feed.get("callSign", "") or ""))
+
+
+def _mlb_media_feed_label(feed):
+    feed_type = str(feed.get("feedType", "") or "").upper()
+    call_sign = str(feed.get("callSign", "") or "").strip()
+    if feed_type == "HOME":
+        base = "Listen Home"
+    elif feed_type == "AWAY":
+        base = "Listen Away"
+    elif feed_type == "NETWORK":
+        base = "Listen Network"
+    else:
+        base = "Listen"
+    return base + " (" + call_sign + ")" if call_sign else base
+
+
+def _mlb_video_feed_label(feed):
+    feed_type = str(feed.get("feedType", "") or "").upper()
+    call_sign = str(feed.get("callSign", "") or "").strip()
+    if feed_type == "HOME":
+        base = "TV Home"
+    elif feed_type == "AWAY":
+        base = "TV Away"
+    elif feed_type == "NETWORK":
+        base = "TV Network"
+    else:
+        base = "TV"
+    return base + " (" + call_sign + ")" if call_sign else base
+
+
+def _mlb_media_links_query(game_pk, game_date):
+    payload = {
+        "operationName": "gameMedia",
+        "query": (
+            "query gameMedia($gamePk: Int!, $date: String!) { "
+            "gameMedia(gamePk: $gamePk, date: $date) { "
+            "gamePk gameDate content { contentId mediaId feedType callSign mediaState { state mediaType contentExperience } } "
+            "} }"
+        ),
+        "variables": {"gamePk": int(game_pk), "date": str(game_date or "")},
+    }
+    request_obj = urllib.request.Request(
+        _MLB_MEDIA_GATEWAY_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", "User-Agent": "BaseClaw/1.0"},
+    )
+    with urllib.request.urlopen(request_obj, timeout=15) as response:
+        body = response.read().decode("utf-8")
+    data = json.loads(body) if body else {}
+    return data.get("data", {}).get("gameMedia", {}) if isinstance(data, dict) else {}
+
+
+def _mlb_media_links_for_game(game_pk, game_date):
+    if not game_pk:
+        return {"watch_url": "", "watch_links": [], "audio_links": []}
+
+    cache_key = ("mlb-media-links", str(game_pk), str(game_date or ""))
+    cached = _dashboard_cache_get(cache_key, 300)
+    if cached is not None:
+        return cached
+
+    result = {"watch_url": "https://www.mlb.com/tv/g" + str(game_pk), "watch_links": [], "audio_links": []}
+    try:
+        game_media = _mlb_media_links_query(game_pk, game_date)
+    except Exception:
+        _dashboard_cache_set(cache_key, result)
+        return result
+
+    audio_links = []
+    watch_links = []
+    for feed in sorted(game_media.get("content", []) if isinstance(game_media, dict) else [], key=_mlb_media_feed_sort_key):
+        if not isinstance(feed, dict):
+            continue
+        media_id = str(feed.get("mediaId", "") or feed.get("contentId", "") or "").strip()
+        media_type = str((feed.get("mediaState", {}) or {}).get("mediaType", "") or "").upper()
+        if not media_id:
+            continue
+        if media_type == "AUDIO":
+            audio_links.append(
+                {
+                    "label": _mlb_media_feed_label(feed),
+                    "url": "https://www.mlb.com/tv/g" + str(game_pk) + "/v" + media_id,
+                }
+            )
+        elif media_type == "VIDEO":
+            watch_links.append(
+                {
+                    "label": _mlb_video_feed_label(feed),
+                    "url": "https://www.mlb.com/tv/g" + str(game_pk) + "/v" + media_id,
+                }
+            )
+
+    result["watch_links"] = watch_links
+    result["audio_links"] = audio_links
+    _dashboard_cache_set(cache_key, result)
+    return result
+
+
 def _operator_rows_by_team(rows):
     by_team = {}
     for row in rows:
@@ -814,7 +930,7 @@ def _operator_scoreboard_context(scoreboard_date):
     }
 
 
-def _operator_attach_relevance(normalized, my_by_team, opp_by_team, include_players=True):
+def _operator_attach_relevance(normalized, my_by_team, opp_by_team, include_players=True, scoreboard_date=""):
     away_abbr = str(normalized.get("away_team", {}).get("abbr", "") or "").upper()
     home_abbr = str(normalized.get("home_team", {}).get("abbr", "") or "").upper()
     my_players = list(my_by_team.get(away_abbr, [])) + list(my_by_team.get(home_abbr, []))
@@ -829,6 +945,9 @@ def _operator_attach_relevance(normalized, my_by_team, opp_by_team, include_play
     normalized["opp_active_count"] = sum(1 for p in opp_players if p.get("slot_status") == "active")
     normalized["opp_inactive_count"] = sum(1 for p in opp_players if p.get("slot_status") != "active")
     normalized["total_relevant_count"] = len(my_players) + len(opp_players)
+    game_pk = _operator_game_pk_from_game_id(normalized.get("game_id"))
+    if game_pk:
+        normalized["media_links"] = _mlb_media_links_for_game(game_pk, scoreboard_date)
     return normalized
 
 
@@ -844,7 +963,15 @@ def _operator_scoreboard_summary_payload(scoreboard_date):
             include_players=False,
             include_live_state=False,
         )
-        games.append(_operator_attach_relevance(normalized, context["my_by_team"], context["opp_by_team"], include_players=False))
+        games.append(
+            _operator_attach_relevance(
+                normalized,
+                context["my_by_team"],
+                context["opp_by_team"],
+                include_players=False,
+                scoreboard_date=context["date"],
+            )
+        )
 
     return {
         "date": context["date"],
@@ -880,7 +1007,13 @@ def _operator_scoreboard_game_payload(scoreboard_date, requested_game_id):
         include_players=True,
         include_live_state=True,
     )
-    normalized = _operator_attach_relevance(normalized, context["my_by_team"], context["opp_by_team"], include_players=True)
+    normalized = _operator_attach_relevance(
+        normalized,
+        context["my_by_team"],
+        context["opp_by_team"],
+        include_players=True,
+        scoreboard_date=context["date"],
+    )
     return {
         "date": context["date"],
         "generated_at": _operator_generated_at(),
@@ -900,7 +1033,15 @@ def _operator_scoreboard_payload(scoreboard_date):
             include_players=True,
             include_live_state=True,
         )
-        games.append(_operator_attach_relevance(normalized, context["my_by_team"], context["opp_by_team"], include_players=True))
+        games.append(
+            _operator_attach_relevance(
+                normalized,
+                context["my_by_team"],
+                context["opp_by_team"],
+                include_players=True,
+                scoreboard_date=context["date"],
+            )
+        )
 
     return {"date": context["date"], "generated_at": _operator_generated_at(), "games": _operator_sort_games(games)}
 
@@ -2800,6 +2941,36 @@ def api_mlb_schedule():
             args.append(date_arg)
         result = mlb_data.cmd_schedule(args, as_json=True)
         return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/mlb/media-links")
+def api_mlb_media_links():
+    try:
+        game_id = str(request.args.get("game_id", "") or "").strip()
+        game_pk = str(request.args.get("game_pk", "") or "").strip()
+        requested_date = str(request.args.get("date", "") or "").strip()
+
+        if game_id and not game_pk:
+            game_pk = _operator_game_pk_from_game_id(game_id)
+        if not game_pk:
+            return jsonify({"error": "Missing game_id or game_pk"}), 400
+
+        if not requested_date:
+            requested_date = _operator_scoreboard_target_date(request.args).isoformat()
+
+        result = _mlb_media_links_for_game(game_pk, requested_date)
+        return jsonify(
+            {
+                "date": requested_date,
+                "game_id": "mlb-" + str(game_pk),
+                "game_pk": str(game_pk),
+                "media_links": result,
+            }
+        )
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
