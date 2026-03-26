@@ -1,4 +1,4 @@
-import { createServer } from "./server.js";
+import { createPlainServer, createServer } from "./server.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
@@ -16,6 +16,16 @@ function escapeHtml(s: string): string {
 
 async function handleMcp(req: Request, res: Response): Promise<void> {
   const server = createServer();
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+  });
+  res.on("close", () => { transport.close(); });
+  await server.connect(transport);
+  await transport.handleRequest(req, res, req.body);
+}
+
+async function handlePlainMcp(req: Request, res: Response): Promise<void> {
+  const server = createPlainServer();
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
   });
@@ -122,7 +132,12 @@ async function main() {
     const auth = requireBearerAuth({ verifier: provider, requiredScopes: ["baseclaw"] });
     app.post("/mcp", auth, handleMcp);
     app.get("/mcp", auth, handleMcp);
+    app.post("/mcp/openai", auth, handlePlainMcp);
+    app.get("/mcp/openai", auth, handlePlainMcp);
     app.delete("/mcp", async (_req, res) => {
+      res.status(405).send("Method not allowed");
+    });
+    app.delete("/mcp/openai", async (_req, res) => {
       res.status(405).send("Method not allowed");
     });
 

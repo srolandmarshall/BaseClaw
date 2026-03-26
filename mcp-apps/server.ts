@@ -12,6 +12,7 @@ import { registerMlbTools } from "./src/tools/mlb-tools.js";
 import { registerIntelTools } from "./src/tools/intel-tools.js";
 import { registerWorkflowTools } from "./src/tools/workflow-tools.js";
 import { registerStrategyTools } from "./src/tools/strategy-tools.js";
+import { registerPlainTools } from "./src/tools/plain-tools.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = __dirname;
@@ -43,6 +44,22 @@ export function createServer(): McpServer {
   registerIntelTools(server, DIST_DIR);
   registerWorkflowTools(server, WRITES_ENABLED);
   registerStrategyTools(server);
+
+  return server;
+}
+
+export function createPlainServer(): McpServer {
+  const server = new McpServer({
+    name: "Yahoo Fantasy Baseball",
+    version: "1.0.0",
+    icons: [{
+      src: LOGO_DATA_URI,
+      mimeType: "image/png",
+      sizes: ["128x128"],
+    }],
+  });
+
+  registerPlainTools(server);
 
   return server;
 }

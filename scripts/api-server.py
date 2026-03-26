@@ -904,6 +904,133 @@ def _operator_scoreboard_payload(scoreboard_date):
     return {"date": context["date"], "generated_at": _operator_generated_at(), "games": _operator_sort_games(games)}
 
 
+def _mlb_stat_group_from_player_info(player_info):
+    position_name = str((player_info or {}).get("position", "") or "").strip().lower()
+    throws = str((player_info or {}).get("throws", "") or "").strip().upper()
+    if "pitch" in position_name or position_name in {"p", "sp", "rp", "starter", "reliever"}:
+        return "pitching"
+    if throws in {"R", "L", "S"} and position_name in {"pitcher"}:
+        return "pitching"
+    return "hitting"
+
+
+def _latest_game_log_entry(games, requested_date=""):
+    if not isinstance(games, list) or not games:
+        return None, False
+
+    filtered = [g for g in games if isinstance(g, dict) and str(g.get("date", "") or "")]
+    if not filtered:
+        return None, False
+
+    filtered.sort(key=lambda game: str(game.get("date", "") or ""), reverse=True)
+    if requested_date:
+        for game in filtered:
+            if str(game.get("date", "") or "") == requested_date:
+                return game, True
+    return filtered[0], False
+
+
+def _mlb_latest_outing_summary(stat_group, entry):
+    stat_group = str(stat_group or "")
+    entry = entry if isinstance(entry, dict) else {}
+
+    if stat_group == "pitching":
+        parts = [
+            str(entry.get("inningsPitched", "") or entry.get("innings_pitched", "") or "0.0") + " IP",
+            str(_safe_int(entry.get("earnedRuns"), 0) or 0) + " ER",
+            str(_safe_int(entry.get("strikeOuts"), 0) or 0) + " K",
+        ]
+        walks = _safe_int(entry.get("baseOnBalls"), 0)
+        if walks is not None:
+            parts.append(str(walks) + " BB")
+        return ", ".join(parts)
+
+    hits = _safe_int(entry.get("hits"), 0) or 0
+    runs = _safe_int(entry.get("runs"), 0) or 0
+    rbi = _safe_int(entry.get("rbi"), 0) or 0
+    homers = _safe_int(entry.get("homeRuns"), 0) or 0
+    steals = _safe_int(entry.get("stolenBases"), 0) or 0
+    at_bats = _safe_int(entry.get("atBats"), 0) or 0
+    parts = [str(hits) + "-" + str(at_bats)]
+    if homers:
+        parts.append(str(homers) + " HR")
+    if runs:
+        parts.append(str(runs) + " R")
+    if rbi:
+        parts.append(str(rbi) + " RBI")
+    if steals:
+        parts.append(str(steals) + " SB")
+    return ", ".join(parts)
+
+
+def _mlb_latest_outing_payload(player_name="", player_id="", requested_date=""):
+    resolved_player_id = str(player_id or "").strip()
+    resolved_player_name = str(player_name or "").strip()
+
+    if not resolved_player_id and resolved_player_name:
+        resolved = get_mlb_id(resolved_player_name)
+        if resolved:
+            resolved_player_id = str(resolved)
+
+    if not resolved_player_id:
+        raise ValueError("Missing player_name or player_id")
+
+    player_info = mlb_data.cmd_player([resolved_player_id], as_json=True)
+    if not isinstance(player_info, dict) or player_info.get("error"):
+        raise ValueError("Player not found")
+
+    stat_group = _mlb_stat_group_from_player_info(player_info)
+    games = intel._fetch_mlb_game_log(resolved_player_id, stat_group, 14)
+    latest_entry, matched_requested_date = _latest_game_log_entry(games, requested_date=requested_date)
+    if latest_entry is None:
+        return {
+            "player_name": player_info.get("name", resolved_player_name),
+            "mlb_id": _safe_int(resolved_player_id, 0) or 0,
+            "stat_group": stat_group,
+            "requested_date": requested_date or None,
+            "matched_requested_date": False,
+            "outing": None,
+            "summary": "No recent MLB outing found.",
+        }
+
+    outing = {
+        "date": str(latest_entry.get("date", "") or ""),
+        "opponent": str(latest_entry.get("opponent", "") or ""),
+        "summary": str(latest_entry.get("summary", "") or _mlb_latest_outing_summary(stat_group, latest_entry)),
+    }
+
+    if stat_group == "pitching":
+        outing["innings_pitched"] = str(latest_entry.get("inningsPitched", "") or latest_entry.get("innings_pitched", "") or "")
+        outing["hits"] = _safe_int(latest_entry.get("hits"), 0) or 0
+        outing["runs"] = _safe_int(latest_entry.get("runs"), 0) or 0
+        outing["earned_runs"] = _safe_int(latest_entry.get("earnedRuns"), 0) or 0
+        outing["walks"] = _safe_int(latest_entry.get("baseOnBalls"), 0) or 0
+        outing["strikeouts"] = _safe_int(latest_entry.get("strikeOuts"), 0) or 0
+        outing["home_runs"] = _safe_int(latest_entry.get("homeRuns"), 0) or 0
+        outing["pitch_count"] = _safe_int(latest_entry.get("numberOfPitches"), 0)
+    else:
+        outing["at_bats"] = _safe_int(latest_entry.get("atBats"), 0) or 0
+        outing["hits"] = _safe_int(latest_entry.get("hits"), 0) or 0
+        outing["runs"] = _safe_int(latest_entry.get("runs"), 0) or 0
+        outing["rbi"] = _safe_int(latest_entry.get("rbi"), 0) or 0
+        outing["home_runs"] = _safe_int(latest_entry.get("homeRuns"), 0) or 0
+        outing["walks"] = _safe_int(latest_entry.get("baseOnBalls"), 0) or 0
+        outing["strikeouts"] = _safe_int(latest_entry.get("strikeOuts"), 0) or 0
+        outing["stolen_bases"] = _safe_int(latest_entry.get("stolenBases"), 0) or 0
+
+    return {
+        "player_name": player_info.get("name", resolved_player_name),
+        "mlb_id": _safe_int(resolved_player_id, 0) or 0,
+        "team": player_info.get("team", ""),
+        "position": player_info.get("position", ""),
+        "stat_group": stat_group,
+        "requested_date": requested_date or None,
+        "matched_requested_date": bool(matched_requested_date),
+        "outing": outing,
+        "summary": outing["summary"],
+    }
+
+
 def _fantasy_matchup_record(matchup, team1_key, team2_key):
     wins1 = 0
     wins2 = 0
@@ -2613,6 +2740,25 @@ def api_mlb_stats():
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/mlb/latest-outing")
+def api_mlb_latest_outing():
+    try:
+        player_name = request.args.get("player_name", "")
+        player_id = request.args.get("player_id", "")
+        requested_date = request.args.get("date", "")
+        if requested_date:
+            try:
+                date.fromisoformat(requested_date)
+            except ValueError as e:
+                return _json_error("Invalid date. Expected YYYY-MM-DD.", status=400)
+        result = _mlb_latest_outing_payload(player_name=player_name, player_id=player_id, requested_date=requested_date)
+        return jsonify(result)
+    except ValueError as e:
+        return _json_error(e, status=400)
+    except Exception as e:
+        return _json_error(e, status=500)
 
 
 @app.route("/api/mlb/injuries")

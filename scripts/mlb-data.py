@@ -76,7 +76,7 @@ def cmd_player(args, as_json=False):
         return
 
     player_id = args[0]
-    data = fetch("/people/" + player_id)
+    data = fetch("/people/" + player_id + "?hydrate=currentTeam")
 
     people = data.get("people", [])
     if as_json:

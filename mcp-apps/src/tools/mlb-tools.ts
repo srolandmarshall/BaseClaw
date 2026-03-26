@@ -10,6 +10,7 @@ import {
   type MlbRosterResponse,
   type MlbPlayerResponse,
   type MlbStatsResponse,
+  type MlbLatestOutingResponse,
   type MlbInjuriesResponse,
   type MlbStandingsResponse,
   type MlbScheduleResponse,
@@ -144,6 +145,50 @@ export function registerMlbTools(server: McpServer, distDir: string) {
         return {
           content: [{ type: "text" as const, text: lines.join("\n") }],
           structuredContent: { type: "mlb-stats", ai_recommendation: null, ...data },
+        };
+      } catch (e) { return toolError(e); }
+    },
+  );
+
+  // mlb_latest_outing
+  registerAppTool(
+    server,
+    "mlb_latest_outing",
+    {
+      description: "Get a player's latest MLB outing or game performance by player name or MLB player ID",
+      inputSchema: {
+        player_name: z.string().describe("Player name to look up").default(""),
+        player_id: z.string().describe("Optional MLB Stats API player ID").default(""),
+        date: z.string().describe("Optional target date in YYYY-MM-DD; returns that date if found, otherwise latest outing").default(""),
+      },
+      annotations: { readOnlyHint: true },
+      _meta: { ui: { resourceUri: MLB_URI } },
+    },
+    async ({ player_name, player_id, date }) => {
+      try {
+        const params: Record<string, string> = {};
+        if (player_name) params.player_name = player_name;
+        if (player_id) params.player_id = player_id;
+        if (date) params.date = date;
+        const data = await apiGet<MlbLatestOutingResponse>("/api/mlb/latest-outing", params);
+        const lines = [
+          "Latest outing for " + data.player_name + ":",
+          "  " + (data.outing?.date || "?") + " vs " + (data.outing?.opponent || "?"),
+          "  " + data.summary,
+        ];
+        if (data.stat_group === "pitching" && data.outing) {
+          lines.push(
+            "  IP/H/ER/BB/K: "
+              + str(data.outing.innings_pitched) + "/"
+              + str(data.outing.hits) + "/"
+              + str(data.outing.earned_runs) + "/"
+              + str(data.outing.walks) + "/"
+              + str(data.outing.strikeouts),
+          );
+        }
+        return {
+          content: [{ type: "text" as const, text: lines.join("\n") }],
+          structuredContent: { type: "mlb-latest-outing", ai_recommendation: null, ...data },
         };
       } catch (e) { return toolError(e); }
     },

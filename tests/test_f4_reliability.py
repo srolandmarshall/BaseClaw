@@ -1526,6 +1526,107 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(payload["action"], "reauthorize_browser_session")
         self.assertEqual(payload["auth_type"], "browser_session")
 
+    def test_mlb_latest_outing_returns_latest_pitching_line_by_player_name(self):
+        mlb_data_module = _module("mlb-data")
+        mlb_data_module.cmd_player = lambda args, as_json=False: {
+            "name": "Logan Webb",
+            "position": "Pitcher",
+            "team": "San Francisco Giants",
+            "bats": "R",
+            "throws": "R",
+            "age": 29,
+            "mlb_id": 657277,
+        }
+
+        intel_module = _module("intel")
+        intel_module._fetch_mlb_game_log = lambda mlb_id, stat_group, days: [
+            {
+                "date": "2026-03-24",
+                "opponent": "San Diego Padres",
+                "summary": "5.0 IP, 6 ER, 7 K, BB",
+                "inningsPitched": "5.0",
+                "hits": 9,
+                "runs": 7,
+                "earnedRuns": 6,
+                "baseOnBalls": 1,
+                "strikeOuts": 7,
+                "homeRuns": 0,
+                "numberOfPitches": 86,
+            }
+        ]
+
+        api_module = _load_script(
+            "api_server_mlb_latest_outing_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": mlb_data_module,
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": intel_module,
+                "news": _module("news"),
+                "yahoo_browser": types.SimpleNamespace(
+                    is_session_valid=lambda: {"valid": False, "reason": "No session file found"},
+                    get_heartbeat_state=lambda: {},
+                ),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda name, *_args, **_kwargs: 657277 if name == "Logan Webb" else None),
+            },
+        )
+
+        api_module.request.args = {"player_name": "Logan Webb"}
+        payload = api_module.api_mlb_latest_outing()
+
+        self.assertEqual(payload["player_name"], "Logan Webb")
+        self.assertEqual(payload["mlb_id"], 657277)
+        self.assertEqual(payload["stat_group"], "pitching")
+        self.assertEqual(payload["outing"]["date"], "2026-03-24")
+        self.assertEqual(payload["outing"]["opponent"], "San Diego Padres")
+        self.assertEqual(payload["outing"]["innings_pitched"], "5.0")
+        self.assertEqual(payload["outing"]["earned_runs"], 6)
+        self.assertEqual(payload["outing"]["strikeouts"], 7)
+        self.assertEqual(payload["summary"], "5.0 IP, 6 ER, 7 K, BB")
+
+    def test_mlb_latest_outing_rejects_invalid_date(self):
+        api_module = _load_script(
+            "api_server_mlb_latest_outing_invalid_date_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": types.SimpleNamespace(
+                    is_session_valid=lambda: {"valid": False, "reason": "No session file found"},
+                    get_heartbeat_state=lambda: {},
+                ),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        api_module.request.args = {"player_name": "Logan Webb", "date": "03/24/2026"}
+        payload, status = api_module.api_mlb_latest_outing()
+
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["error"], "Invalid date. Expected YYYY-MM-DD.")
+
     def test_operator_live_state_normalizes_mid_inning_transitions(self):
         api_module = _load_script(
             "api_server_operator_live_state_mid_for_test",

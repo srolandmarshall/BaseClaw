@@ -452,6 +452,35 @@ export interface MlbStatsResponse {
   stats: Record<string, string | number>;
 }
 
+export interface MlbLatestOuting {
+  date: string;
+  opponent: string;
+  summary: string;
+  innings_pitched?: string;
+  hits?: number;
+  runs?: number;
+  earned_runs?: number;
+  walks?: number;
+  strikeouts?: number;
+  home_runs?: number;
+  pitch_count?: number | null;
+  at_bats?: number;
+  rbi?: number;
+  stolen_bases?: number;
+}
+
+export interface MlbLatestOutingResponse {
+  player_name: string;
+  mlb_id: number;
+  team?: string;
+  position?: string;
+  stat_group: string;
+  requested_date?: string | null;
+  matched_requested_date: boolean;
+  outing: MlbLatestOuting | null;
+  summary: string;
+}
+
 export interface MlbInjury {
   player: string;
   team: string;
