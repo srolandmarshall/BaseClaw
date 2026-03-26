@@ -11,6 +11,7 @@ import time
 import json
 import hashlib
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 from mlb_id_cache import get_mlb_id
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -50,6 +51,7 @@ import draft_sim
 app = Flask(__name__)
 _DASHBOARD_CACHE = {}
 _DASHBOARD_CACHE_DIR = os.path.join(os.environ.get("DATA_DIR", "/app/data"), "dashboard-cache")
+_OPERATOR_SCOREBOARD_TZ = ZoneInfo("America/New_York")
 
 
 def _dashboard_cache_file(key):
@@ -607,11 +609,28 @@ def _operator_fill_missing_team_abbr(rows, mlb_fetch, abbr_lookup):
             row["team_abbr"] = resolved
 
 
-def _operator_scoreboard_payload():
+def _operator_scoreboard_target_date(args=None):
+    requested_date = ""
+    if args is not None:
+        try:
+            requested_date = str(args.get("date", "") or "").strip()
+        except Exception:
+            requested_date = ""
+
+    if requested_date:
+        try:
+            return date.fromisoformat(requested_date)
+        except ValueError as exc:
+            raise ValueError("Invalid date. Expected YYYY-MM-DD.") from exc
+
+    return datetime.now(_OPERATOR_SCOREBOARD_TZ).date()
+
+
+def _operator_scoreboard_payload(scoreboard_date):
     from shared import mlb_fetch
 
-    scoreboard_date = date.today().isoformat()
-    schedule_data = mlb_fetch("/schedule?sportId=1&date=" + scoreboard_date + "&hydrate=linescore,team")
+    scoreboard_date_str = scoreboard_date.isoformat()
+    schedule_data = mlb_fetch("/schedule?sportId=1&date=" + scoreboard_date_str + "&hydrate=linescore,team")
     abbr_lookup = _operator_team_abbr_map(mlb_fetch)
 
     my_rows = []
@@ -677,7 +696,7 @@ def _operator_scoreboard_payload():
             games.append(normalized)
 
     return {
-        "date": scoreboard_date,
+        "date": scoreboard_date_str,
         "generated_at": _operator_generated_at(),
         "games": _operator_sort_games(games),
     }
@@ -1217,7 +1236,12 @@ def api_scoreboard():
 
 @app.route("/api/operator-scoreboard")
 def api_operator_scoreboard():
-    cache_key = ("operator-scoreboard", date.today().isoformat())
+    try:
+        scoreboard_date = _operator_scoreboard_target_date(request.args)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    cache_key = ("operator-scoreboard", scoreboard_date.isoformat())
     requested_game_id = str(request.args.get("game_id", "") or "").strip()
     cached = _dashboard_cache_get(cache_key, 30)
     if cached is not None:
@@ -1230,7 +1254,7 @@ def api_operator_scoreboard():
             return jsonify(filtered)
         return jsonify(cached)
     try:
-        result = _operator_scoreboard_payload()
+        result = _operator_scoreboard_payload(scoreboard_date)
         _dashboard_cache_set(cache_key, result)
         if requested_game_id:
             filtered = dict(result)

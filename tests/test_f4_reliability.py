@@ -3,7 +3,7 @@ import pathlib
 import sys
 import types
 import unittest
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import patch
 
 
@@ -825,15 +825,8 @@ class ReliabilityHardeningTests(unittest.TestCase):
         )
 
         api_module.sys.modules["shared"] = shared_module
-        api_module.request.args = {}
-
-        class FakeDate:
-            @staticmethod
-            def today():
-                return date(2026, 3, 24)
-
-        with patch.object(api_module, "date", FakeDate):
-            payload = api_module.api_operator_scoreboard()
+        api_module.request.args = {"date": "2026-03-24"}
+        payload = api_module.api_operator_scoreboard()
 
         self.assertEqual(payload["date"], "2026-03-24")
         self.assertIn("generated_at", payload)
@@ -905,8 +898,8 @@ class ReliabilityHardeningTests(unittest.TestCase):
         )
 
         api_module._DASHBOARD_CACHE = {}
-        api_module.request.args = {"game_id": "mlb-22"}
-        api_module._operator_scoreboard_payload = lambda: {
+        api_module.request.args = {"date": "2026-03-24", "game_id": "mlb-22"}
+        api_module._operator_scoreboard_payload = lambda scoreboard_date: {
             "date": "2026-03-24",
             "generated_at": "2026-03-24T16:00:00Z",
             "games": [
@@ -914,14 +907,7 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 {"game_id": "mlb-22", "status": "Scheduled"},
             ],
         }
-
-        class FakeDate:
-            @staticmethod
-            def today():
-                return date(2026, 3, 24)
-
-        with patch.object(api_module, "date", FakeDate):
-            payload = api_module.api_operator_scoreboard()
+        payload = api_module.api_operator_scoreboard()
 
         self.assertEqual(payload["date"], "2026-03-24")
         self.assertEqual(payload["generated_at"], "2026-03-24T16:00:00Z")
@@ -988,13 +974,8 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
         api_module.sys.modules["shared"] = shared_module
 
-        class FakeDate:
-            @staticmethod
-            def today():
-                return date(2026, 3, 24)
-
-        with patch.object(api_module, "date", FakeDate):
-            payload = api_module.api_operator_scoreboard()
+        api_module.request.args = {"date": "2026-03-24"}
+        payload = api_module.api_operator_scoreboard()
 
         self.assertEqual(payload["date"], "2026-03-24")
         self.assertEqual(len(payload["games"]), 1)
@@ -1005,6 +986,70 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(payload["games"][0]["opp_players"], [])
         self.assertEqual(payload["games"][0]["my_team_name"], "")
         self.assertEqual(payload["games"][0]["opponent_team_name"], "")
+
+    def test_operator_scoreboard_target_date_defaults_to_eastern_day(self):
+        api_module = _load_script(
+            "api_server_operator_scoreboard_date_default_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        class FakeDateTime:
+            @classmethod
+            def now(cls, tz=None):
+                return datetime(2026, 3, 25, 21, 30, tzinfo=tz)
+
+        with patch.object(api_module, "datetime", FakeDateTime):
+            resolved = api_module._operator_scoreboard_target_date({})
+
+        self.assertEqual(resolved.isoformat(), "2026-03-25")
+
+    def test_operator_scoreboard_endpoint_rejects_invalid_date_param(self):
+        api_module = _load_script(
+            "api_server_operator_scoreboard_invalid_date_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        api_module.request.args = {"date": "03/25/2026"}
+        payload, status = api_module.api_operator_scoreboard()
+
+        self.assertEqual(status, 400)
+        self.assertEqual(payload, {"error": "Invalid date. Expected YYYY-MM-DD."})
 
     def test_operator_live_state_normalizes_mid_inning_transitions(self):
         api_module = _load_script(
