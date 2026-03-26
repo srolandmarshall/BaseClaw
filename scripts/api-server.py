@@ -383,6 +383,13 @@ def _operator_sort_games(games):
     return sorted(games, key=_sort_key)
 
 
+def _operator_iter_schedule_games(schedule_data):
+    for date_block in schedule_data.get("dates", []) if isinstance(schedule_data, dict) else []:
+        for game in date_block.get("games", []) if isinstance(date_block, dict) else []:
+            if isinstance(game, dict):
+                yield game
+
+
 def _operator_team_abbr_map(mlb_fetch):
     lookup = {}
     data = mlb_fetch("/teams?sportId=1")
@@ -469,7 +476,14 @@ def _operator_live_state(game, away_abbr, home_abbr):
     }
 
 
-def _operator_normalize_game(game, abbr_lookup, my_team_name, opponent_team_name):
+def _operator_normalize_game(
+    game,
+    abbr_lookup,
+    my_team_name,
+    opponent_team_name,
+    include_players=True,
+    include_live_state=True,
+):
     teams = game.get("teams", {}) if isinstance(game, dict) else {}
     away = teams.get("away", {}) if isinstance(teams, dict) else {}
     home = teams.get("home", {}) if isinstance(teams, dict) else {}
@@ -506,12 +520,14 @@ def _operator_normalize_game(game, abbr_lookup, my_team_name, opponent_team_name
         "opp_active_count": 0,
         "opp_inactive_count": 0,
         "total_relevant_count": 0,
-        "my_players": [],
-        "opp_players": [],
     }
-    live_state = _operator_live_state(game, away_abbr, home_abbr)
-    if live_state is not None:
-        normalized["live_state"] = live_state
+    if include_players:
+        normalized["my_players"] = []
+        normalized["opp_players"] = []
+    if include_live_state:
+        live_state = _operator_live_state(game, away_abbr, home_abbr)
+        if live_state is not None:
+            normalized["live_state"] = live_state
     return normalized
 
 
@@ -609,6 +625,22 @@ def _operator_fill_missing_team_abbr(rows, mlb_fetch, abbr_lookup):
             row["team_abbr"] = resolved
 
 
+def _operator_rows_by_team(rows):
+    by_team = {}
+    for row in rows:
+        team_abbr = str(row.get("team_abbr", "") or "").upper()
+        if not team_abbr:
+            continue
+        by_team.setdefault(team_abbr, []).append(
+            {
+                "name": row.get("name", ""),
+                "slot_status": row.get("slot_status", "active"),
+                "fantasy_position": row.get("fantasy_position", ""),
+            }
+        )
+    return by_team
+
+
 def _operator_scoreboard_target_date(args=None):
     requested_date = ""
     if args is not None:
@@ -626,7 +658,7 @@ def _operator_scoreboard_target_date(args=None):
     return datetime.now(_OPERATOR_SCOREBOARD_TZ).date()
 
 
-def _operator_scoreboard_payload(scoreboard_date):
+def _operator_scoreboard_context(scoreboard_date):
     from shared import mlb_fetch
 
     scoreboard_date_str = scoreboard_date.isoformat()
@@ -652,53 +684,191 @@ def _operator_scoreboard_payload(scoreboard_date):
         my_rows = []
         opp_rows = []
 
-    my_by_team = {}
-    opp_by_team = {}
-
-    for row in my_rows:
-        team_abbr = row.get("team_abbr", "")
-        if team_abbr:
-            my_by_team.setdefault(team_abbr, []).append(
-                {
-                    "name": row.get("name", ""),
-                    "slot_status": row.get("slot_status", "active"),
-                    "fantasy_position": row.get("fantasy_position", ""),
-                }
-            )
-
-    for row in opp_rows:
-        team_abbr = row.get("team_abbr", "")
-        if team_abbr:
-            opp_by_team.setdefault(team_abbr, []).append(
-                {
-                    "name": row.get("name", ""),
-                    "slot_status": row.get("slot_status", "active"),
-                    "fantasy_position": row.get("fantasy_position", ""),
-                }
-            )
-
-    games = []
-    for date_block in schedule_data.get("dates", []) if isinstance(schedule_data, dict) else []:
-        for game in date_block.get("games", []) if isinstance(date_block, dict) else []:
-            normalized = _operator_normalize_game(game, abbr_lookup, my_team_name, opponent_team_name)
-            away_abbr = str(normalized["away_team"].get("abbr", "") or "").upper()
-            home_abbr = str(normalized["home_team"].get("abbr", "") or "").upper()
-            my_players = list(my_by_team.get(away_abbr, [])) + list(my_by_team.get(home_abbr, []))
-            opp_players = list(opp_by_team.get(away_abbr, [])) + list(opp_by_team.get(home_abbr, []))
-
-            normalized["my_players"] = my_players
-            normalized["opp_players"] = opp_players
-            normalized["my_active_count"] = sum(1 for p in my_players if p.get("slot_status") == "active")
-            normalized["my_inactive_count"] = sum(1 for p in my_players if p.get("slot_status") != "active")
-            normalized["opp_active_count"] = sum(1 for p in opp_players if p.get("slot_status") == "active")
-            normalized["opp_inactive_count"] = sum(1 for p in opp_players if p.get("slot_status") != "active")
-            normalized["total_relevant_count"] = len(my_players) + len(opp_players)
-            games.append(normalized)
-
     return {
         "date": scoreboard_date_str,
+        "schedule_data": schedule_data,
+        "abbr_lookup": abbr_lookup,
+        "my_team_name": my_team_name,
+        "opponent_team_name": opponent_team_name,
+        "my_by_team": _operator_rows_by_team(my_rows),
+        "opp_by_team": _operator_rows_by_team(opp_rows),
+    }
+
+
+def _operator_attach_relevance(normalized, my_by_team, opp_by_team, include_players=True):
+    away_abbr = str(normalized.get("away_team", {}).get("abbr", "") or "").upper()
+    home_abbr = str(normalized.get("home_team", {}).get("abbr", "") or "").upper()
+    my_players = list(my_by_team.get(away_abbr, [])) + list(my_by_team.get(home_abbr, []))
+    opp_players = list(opp_by_team.get(away_abbr, [])) + list(opp_by_team.get(home_abbr, []))
+
+    if include_players:
+        normalized["my_players"] = my_players
+        normalized["opp_players"] = opp_players
+
+    normalized["my_active_count"] = sum(1 for p in my_players if p.get("slot_status") == "active")
+    normalized["my_inactive_count"] = sum(1 for p in my_players if p.get("slot_status") != "active")
+    normalized["opp_active_count"] = sum(1 for p in opp_players if p.get("slot_status") == "active")
+    normalized["opp_inactive_count"] = sum(1 for p in opp_players if p.get("slot_status") != "active")
+    normalized["total_relevant_count"] = len(my_players) + len(opp_players)
+    return normalized
+
+
+def _operator_scoreboard_summary_payload(scoreboard_date):
+    context = _operator_scoreboard_context(scoreboard_date)
+    games = []
+    for game in _operator_iter_schedule_games(context["schedule_data"]):
+        normalized = _operator_normalize_game(
+            game,
+            context["abbr_lookup"],
+            context["my_team_name"],
+            context["opponent_team_name"],
+            include_players=False,
+            include_live_state=False,
+        )
+        games.append(_operator_attach_relevance(normalized, context["my_by_team"], context["opp_by_team"], include_players=False))
+
+    return {
+        "date": context["date"],
         "generated_at": _operator_generated_at(),
         "games": _operator_sort_games(games),
+    }
+
+
+def _operator_scoreboard_game_payload(scoreboard_date, requested_game_id):
+    if not requested_game_id:
+        raise ValueError("Missing game_id")
+
+    context = _operator_scoreboard_context(scoreboard_date)
+    requested_token = str(requested_game_id or "").strip()
+    target_game = None
+    for game in _operator_iter_schedule_games(context["schedule_data"]):
+        if "mlb-" + str(game.get("gamePk", "") or "") == requested_token:
+            target_game = game
+            break
+
+    if target_game is None:
+        return {
+            "date": context["date"],
+            "generated_at": _operator_generated_at(),
+            "game": None,
+        }
+
+    normalized = _operator_normalize_game(
+        target_game,
+        context["abbr_lookup"],
+        context["my_team_name"],
+        context["opponent_team_name"],
+        include_players=True,
+        include_live_state=True,
+    )
+    normalized = _operator_attach_relevance(normalized, context["my_by_team"], context["opp_by_team"], include_players=True)
+    return {
+        "date": context["date"],
+        "generated_at": _operator_generated_at(),
+        "game": normalized,
+    }
+
+
+def _operator_scoreboard_payload(scoreboard_date):
+    context = _operator_scoreboard_context(scoreboard_date)
+    games = []
+    for game in _operator_iter_schedule_games(context["schedule_data"]):
+        normalized = _operator_normalize_game(
+            game,
+            context["abbr_lookup"],
+            context["my_team_name"],
+            context["opponent_team_name"],
+            include_players=True,
+            include_live_state=True,
+        )
+        games.append(_operator_attach_relevance(normalized, context["my_by_team"], context["opp_by_team"], include_players=True))
+
+    return {"date": context["date"], "generated_at": _operator_generated_at(), "games": _operator_sort_games(games)}
+
+
+def _fantasy_matchup_record(matchup, team1_key, team2_key):
+    wins1 = 0
+    wins2 = 0
+    ties = 0
+    stat_winners = matchup.get("stat_winners", []) if isinstance(matchup, dict) else []
+    for item in stat_winners if isinstance(stat_winners, list) else []:
+        winner = item.get("stat_winner", {}) if isinstance(item, dict) else {}
+        if str(winner.get("is_tied", "") or "").lower() in {"1", "true", "yes"} or winner.get("is_tied") is True:
+            ties += 1
+            continue
+        winner_team_key = str(winner.get("winner_team_key", "") or "")
+        if winner_team_key == team1_key:
+            wins1 += 1
+        elif winner_team_key == team2_key:
+            wins2 += 1
+    return wins1, wins2, ties
+
+
+def _fantasy_scoreboard_summary_payload():
+    try:
+        _, _, lg = yahoo_fantasy.get_league()
+        raw = lg.matchups()
+    except Exception:
+        return {"week": "", "my_matchup_summary": {}, "league_matchups": []}
+
+    league_data = raw.get("fantasy_content", {}).get("league", []) if isinstance(raw, dict) else []
+    if len(league_data) < 2:
+        return {"week": "", "my_matchup_summary": {}, "league_matchups": []}
+
+    scoreboard = league_data[1].get("scoreboard", {})
+    week = scoreboard.get("week", "")
+    matchup_block = scoreboard.get("0", {}).get("matchups", {})
+    count = _safe_int(matchup_block.get("count"), 0) or 0
+
+    league_matchups = []
+    my_matchup_summary = {}
+    for i in range(count):
+        matchup = matchup_block.get(str(i), {}).get("matchup", {})
+        matchup_root = matchup.get("0", {}) if isinstance(matchup, dict) else {}
+        teams_data = matchup_root.get("teams", {}) if isinstance(matchup_root, dict) else {}
+        team1 = teams_data.get("0", {}) if isinstance(teams_data, dict) else {}
+        team2 = teams_data.get("1", {}) if isinstance(teams_data, dict) else {}
+        team1_name = yahoo_fantasy._extract_team_name(team1)
+        team2_name = yahoo_fantasy._extract_team_name(team2)
+        team1_key = str(yahoo_fantasy._extract_team_key(team1) or "")
+        team2_key = str(yahoo_fantasy._extract_team_key(team2) or "")
+        status = str(matchup.get("status", "") or "")
+        wins1, wins2, ties = _fantasy_matchup_record(matchup, team1_key, team2_key)
+        league_matchups.append(
+            {
+                "team1": team1_name,
+                "team2": team2_name,
+                "status": status,
+                "score_summary": str(wins1) + "-" + str(wins2) + "-" + str(ties),
+            }
+        )
+
+        if yahoo_fantasy.TEAM_ID not in team1_key and yahoo_fantasy.TEAM_ID not in team2_key:
+            continue
+
+        if yahoo_fantasy.TEAM_ID in team1_key:
+            my_matchup_summary = {
+                "my_team_name": team1_name,
+                "opponent_team_name": team2_name,
+                "matchup_status": status,
+                "wins": wins1,
+                "losses": wins2,
+                "ties": ties,
+            }
+        else:
+            my_matchup_summary = {
+                "my_team_name": team2_name,
+                "opponent_team_name": team1_name,
+                "matchup_status": status,
+                "wins": wins2,
+                "losses": wins1,
+                "ties": ties,
+            }
+
+    return {
+        "week": week,
+        "my_matchup_summary": my_matchup_summary,
+        "league_matchups": league_matchups,
     }
 
 
@@ -1264,6 +1434,64 @@ def api_operator_scoreboard():
             ]
             return jsonify(filtered)
         return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/fantasy-scoreboard-summary")
+def api_fantasy_scoreboard_summary():
+    cache_key = ("fantasy-scoreboard-summary", "current")
+    cached = _dashboard_cache_get(cache_key, 30)
+    if cached is not None:
+        return jsonify(cached)
+    try:
+        result = _fantasy_scoreboard_summary_payload()
+        _dashboard_cache_set(cache_key, result)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/operator-scoreboard-summary")
+def api_operator_scoreboard_summary():
+    try:
+        scoreboard_date = _operator_scoreboard_target_date(request.args)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    cache_key = ("operator-scoreboard-summary", scoreboard_date.isoformat())
+    cached = _dashboard_cache_get(cache_key, 30)
+    if cached is not None:
+        return jsonify(cached)
+    try:
+        result = _operator_scoreboard_summary_payload(scoreboard_date)
+        _dashboard_cache_set(cache_key, result)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/operator-scoreboard-game")
+def api_operator_scoreboard_game():
+    requested_game_id = str(request.args.get("game_id", "") or "").strip()
+    if not requested_game_id:
+        return jsonify({"error": "Missing game_id"}), 400
+
+    try:
+        scoreboard_date = _operator_scoreboard_target_date(request.args)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    cache_key = ("operator-scoreboard-game", scoreboard_date.isoformat(), requested_game_id)
+    cached = _dashboard_cache_get(cache_key, 30)
+    if cached is not None:
+        return jsonify(cached)
+    try:
+        result = _operator_scoreboard_game_payload(scoreboard_date, requested_game_id)
+        _dashboard_cache_set(cache_key, result)
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
