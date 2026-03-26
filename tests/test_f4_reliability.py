@@ -825,6 +825,15 @@ class ReliabilityHardeningTests(unittest.TestCase):
         )
 
         api_module.sys.modules["shared"] = shared_module
+        api_module._mlb_media_links_for_game = lambda game_pk, game_date: {
+            "watch_url": "https://www.mlb.com/tv/g" + str(game_pk),
+            "watch_links": [
+                {"label": "TV Home (YES)", "url": "https://www.mlb.com/tv/g" + str(game_pk) + "/vvideo"}
+            ],
+            "audio_links": [
+                {"label": "Listen Home (WFAN)", "url": "https://www.mlb.com/tv/g" + str(game_pk) + "/vhome"}
+            ],
+        }
         api_module.request.args = {"date": "2026-03-24"}
         payload = api_module.api_operator_scoreboard()
 
@@ -863,6 +872,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(live_game["my_players"][0]["team_abbr"], "NYY")
         self.assertEqual(live_game["opp_players"][0]["fantasy_position"], "Util")
         self.assertEqual(live_game["opp_players"][0]["team_abbr"], "BOS")
+        self.assertEqual(live_game["media_links"]["watch_url"], "https://www.mlb.com/tv/g11")
+        self.assertEqual(live_game["media_links"]["watch_links"][0]["label"], "TV Home (YES)")
+        self.assertEqual(live_game["media_links"]["audio_links"][0]["label"], "Listen Home (WFAN)")
 
         scheduled_game = next(game for game in payload["games"] if game["game_id"] == "mlb-22")
         self.assertNotIn("live_state", scheduled_game)
@@ -871,6 +883,7 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(scheduled_game["total_relevant_count"], 2)
         self.assertEqual(scheduled_game["my_players"][0]["team_abbr"], "CHC")
         self.assertEqual(scheduled_game["opp_players"][0]["team_abbr"], "LAD")
+        self.assertEqual(scheduled_game["media_links"]["watch_url"], "https://www.mlb.com/tv/g22")
 
         empty_game = next(game for game in payload["games"] if game["game_id"] == "mlb-33")
         self.assertEqual(empty_game["total_relevant_count"], 0)
@@ -916,6 +929,51 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(payload["date"], "2026-03-24")
         self.assertEqual(payload["generated_at"], "2026-03-24T16:00:00Z")
         self.assertEqual(payload["games"], [{"game_id": "mlb-22", "status": "Scheduled"}])
+
+    def test_mlb_media_links_endpoint_returns_links_for_game(self):
+        api_module = _load_script(
+            "api_server_mlb_media_links_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        api_module._mlb_media_links_for_game = lambda game_pk, game_date: {
+            "watch_url": "https://www.mlb.com/tv/g" + str(game_pk),
+            "watch_links": [
+                {"label": "TV Home (SNY)", "url": "https://www.mlb.com/tv/g" + str(game_pk) + "/vvideo"}
+            ],
+            "audio_links": [
+                {"label": "Listen Home (WHSQ 880AM)", "url": "https://www.mlb.com/tv/g" + str(game_pk) + "/vhome"},
+                {"label": "Listen Away (KDKA)", "url": "https://www.mlb.com/tv/g" + str(game_pk) + "/vaway"},
+            ],
+        }
+
+        api_module.request.args = {"game_id": "mlb-823649", "date": "2026-03-26"}
+        payload = api_module.api_mlb_media_links()
+
+        self.assertEqual(payload["game_id"], "mlb-823649")
+        self.assertEqual(payload["game_pk"], "823649")
+        self.assertEqual(payload["media_links"]["watch_url"], "https://www.mlb.com/tv/g823649")
+        self.assertEqual(payload["media_links"]["watch_links"][0]["label"], "TV Home (SNY)")
+        self.assertEqual(len(payload["media_links"]["audio_links"]), 2)
+        self.assertEqual(payload["media_links"]["audio_links"][0]["label"], "Listen Home (WHSQ 880AM)")
 
     def test_operator_scoreboard_endpoint_degrades_when_fantasy_linkage_fails(self):
         shared_module = _shared_stub()
