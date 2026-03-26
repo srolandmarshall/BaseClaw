@@ -123,6 +123,124 @@ def _safe_float(value, default=0.0):
         return default
 
 
+def _structured_api_error(message, status=500, extra=None):
+    text = str(message or "")
+    lower = text.lower()
+    payload = {"error": text}
+
+    if "yahoo oauth tokens are missing" in lower:
+        payload.update(
+            {
+                "code": "yahoo_oauth_missing",
+                "retryable": False,
+                "action_required": True,
+                "action": "configure_yahoo_oauth",
+                "auth_type": "oauth",
+            }
+        )
+    elif "invalid_client" in lower or "invalid client_id" in lower:
+        payload.update(
+            {
+                "code": "yahoo_oauth_invalid_client",
+                "retryable": False,
+                "action_required": True,
+                "action": "reauthorize_yahoo_oauth",
+                "auth_type": "oauth",
+            }
+        )
+    elif (
+        "browser session not valid" in lower
+        or "session expired" in lower
+        or "redirected to login page" in lower
+        or "browser-login" in lower
+    ):
+        payload.update(
+            {
+                "code": "yahoo_browser_session_expired",
+                "retryable": False,
+                "action_required": True,
+                "action": "reauthorize_browser_session",
+                "auth_type": "browser_session",
+            }
+        )
+    elif "timeout" in lower or "timed out" in lower:
+        payload.update(
+            {
+                "code": "upstream_timeout",
+                "retryable": True,
+                "action_required": False,
+            }
+        )
+
+    if extra:
+        payload.update(extra)
+    return payload, status
+
+
+def _json_error(exc, status=500, extra=None):
+    payload, code = _structured_api_error(exc, status=status, extra=extra)
+    return jsonify(payload), code
+
+
+def _auth_status_payload():
+    shared = importlib.import_module("shared")
+
+    oauth_file = str(getattr(shared, "OAUTH_FILE", "") or "")
+    read_oauth_file = getattr(shared, "_read_oauth_file", None)
+    oauth_has_tokens = getattr(shared, "_oauth_has_tokens", None)
+    bridge_url = str(getattr(shared, "YAHOO_OAUTH_BRIDGE_URL", os.environ.get("YAHOO_OAUTH_BRIDGE_URL", "")) or "")
+    bridge_token = str(getattr(shared, "YAHOO_OAUTH_BRIDGE_TOKEN", os.environ.get("YAHOO_OAUTH_BRIDGE_TOKEN", "")) or "")
+
+    oauth_payload = {}
+    if callable(read_oauth_file):
+        try:
+            oauth_payload = read_oauth_file() or {}
+        except Exception:
+            oauth_payload = {}
+
+    oauth_ready = False
+    if callable(oauth_has_tokens):
+        try:
+            oauth_ready = bool(oauth_has_tokens(oauth_payload))
+        except Exception:
+            oauth_ready = False
+    else:
+        oauth_ready = bool(oauth_payload)
+
+    oauth_status = {
+        "ready": oauth_ready,
+        "auth_type": "oauth",
+        "oauth_file": oauth_file,
+        "bridge_configured": bool(bridge_url and bridge_token),
+        "consumer_key_present": bool((oauth_payload or {}).get("consumer_key")),
+        "consumer_secret_present": bool((oauth_payload or {}).get("consumer_secret")),
+        "token_present": bool((oauth_payload or {}).get("access_token")),
+        "refresh_token_present": bool((oauth_payload or {}).get("refresh_token")),
+        "guid_present": bool((oauth_payload or {}).get("guid")),
+    }
+
+    browser_status = yahoo_browser.is_session_valid()
+    browser_payload = {
+        "ready": bool(browser_status.get("valid")),
+        "auth_type": "browser_session",
+        "valid": bool(browser_status.get("valid")),
+        "reason": str(browser_status.get("reason", "") or ""),
+        "cookie_count": _safe_int(browser_status.get("cookie_count"), 0) or 0,
+        "heartbeat": yahoo_browser.get_heartbeat_state(),
+        "session_file": str(getattr(yahoo_browser, "SESSION_FILE", "") or ""),
+    }
+
+    return {
+        "oauth_read": oauth_status,
+        "browser_write": browser_payload,
+        "recommended_action": (
+            "configure_yahoo_oauth"
+            if not oauth_status["ready"]
+            else "reauthorize_browser_session" if not browser_payload["ready"] else None
+        ),
+    }
+
+
 def _normalize_positions(value):
     if isinstance(value, list):
         return [str(v) for v in value if str(v)]
@@ -1173,7 +1291,15 @@ def api_browser_login_status():
         result["heartbeat"] = yahoo_browser.get_heartbeat_state()
         return jsonify(result)
     except Exception as e:
-        return jsonify({"valid": False, "reason": str(e)}), 500
+        return _json_error(e, status=500, extra={"valid": False, "reason": str(e)})
+
+
+@app.route("/api/auth-status")
+def api_auth_status():
+    try:
+        return jsonify(_auth_status_payload())
+    except Exception as e:
+        return _json_error(e, status=500)
 
 
 @app.route("/api/change-team-name", methods=["POST"])
@@ -1217,7 +1343,7 @@ def api_roster():
         _dashboard_cache_set(cache_key, result)
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return _json_error(e, status=500)
 
 
 @app.route("/api/free-agents")
@@ -1228,7 +1354,7 @@ def api_free_agents():
         result = yahoo_fantasy.cmd_free_agents([pos_type, count], as_json=True)
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return _json_error(e, status=500)
 
 
 @app.route("/api/hot-bat-free-agents")
@@ -1313,7 +1439,7 @@ def api_league_context():
                 print("Warning: could not fetch FAAB balance for league-context: " + str(e))
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return _json_error(e, status=500)
 
 
 @app.route("/api/search")
@@ -1388,7 +1514,7 @@ def api_matchups():
         result = yahoo_fantasy.cmd_matchups(args, as_json=True)
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return _json_error(e, status=500)
 
 
 @app.route("/api/scoreboard")
@@ -1401,7 +1527,7 @@ def api_scoreboard():
         result = yahoo_fantasy.cmd_scoreboard(args, as_json=True)
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return _json_error(e, status=500)
 
 
 @app.route("/api/operator-scoreboard")
@@ -1449,7 +1575,7 @@ def api_fantasy_scoreboard_summary():
         _dashboard_cache_set(cache_key, result)
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return _json_error(e, status=500)
 
 
 @app.route("/api/operator-scoreboard-summary")
@@ -1457,7 +1583,7 @@ def api_operator_scoreboard_summary():
     try:
         scoreboard_date = _operator_scoreboard_target_date(request.args)
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return _json_error(e, status=400)
 
     cache_key = ("operator-scoreboard-summary", scoreboard_date.isoformat())
     cached = _dashboard_cache_get(cache_key, 30)
@@ -1468,19 +1594,19 @@ def api_operator_scoreboard_summary():
         _dashboard_cache_set(cache_key, result)
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return _json_error(e, status=500)
 
 
 @app.route("/api/operator-scoreboard-game")
 def api_operator_scoreboard_game():
     requested_game_id = str(request.args.get("game_id", "") or "").strip()
     if not requested_game_id:
-        return jsonify({"error": "Missing game_id"}), 400
+        return _json_error("Missing game_id", status=400)
 
     try:
         scoreboard_date = _operator_scoreboard_target_date(request.args)
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return _json_error(e, status=400)
 
     cache_key = ("operator-scoreboard-game", scoreboard_date.isoformat(), requested_game_id)
     cached = _dashboard_cache_get(cache_key, 30)
@@ -1491,9 +1617,9 @@ def api_operator_scoreboard_game():
         _dashboard_cache_set(cache_key, result)
         return jsonify(result)
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return _json_error(e, status=400)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return _json_error(e, status=500)
 
 
 @app.route("/api/transactions")
@@ -1536,7 +1662,7 @@ def api_matchup_detail():
         result = yahoo_fantasy.cmd_matchup_detail([], as_json=True)
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return _json_error(e, status=500)
 
 
 # --- Draft Assistant (draft-assistant.py) ---
@@ -1632,9 +1758,9 @@ def api_best_available():
         finally:
             pool.shutdown(wait=False)
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return _json_error(e, status=400)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return _json_error(e, status=500)
 
 
 # --- Valuations (valuations.py) ---

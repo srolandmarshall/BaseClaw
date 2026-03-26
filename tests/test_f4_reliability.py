@@ -1436,6 +1436,96 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(payload["game"]["my_active_count"], 1)
         self.assertEqual(payload["game"]["opp_active_count"], 1)
 
+    def test_auth_status_reports_oauth_and_browser_readiness(self):
+        shared_module = _shared_stub()
+        shared_module.OAUTH_FILE = "/tmp/yahoo_oauth.json"
+        shared_module.YAHOO_OAUTH_BRIDGE_URL = "https://dashboard.example/internal/baseclaw/yahoo_oauth"
+        shared_module.YAHOO_OAUTH_BRIDGE_TOKEN = "secret"
+        shared_module._read_oauth_file = lambda: {
+            "consumer_key": "ck",
+            "consumer_secret": "cs",
+            "access_token": "at",
+            "refresh_token": "rt",
+            "guid": "guid-1",
+        }
+        shared_module._oauth_has_tokens = lambda payload: bool(payload.get("access_token") and payload.get("refresh_token"))
+
+        yahoo_browser_module = _module("yahoo_browser")
+        yahoo_browser_module.SESSION_FILE = "/tmp/yahoo_session.json"
+        yahoo_browser_module.is_session_valid = lambda: {"valid": False, "reason": "No session file found"}
+        yahoo_browser_module.get_heartbeat_state = lambda: {"last_ok": None, "last_error": None}
+
+        api_module = _load_script(
+            "api_server_auth_status_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": shared_module,
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": yahoo_browser_module,
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+        api_module.sys.modules["shared"] = shared_module
+
+        payload = api_module.api_auth_status()
+
+        self.assertTrue(payload["oauth_read"]["ready"])
+        self.assertTrue(payload["oauth_read"]["bridge_configured"])
+        self.assertTrue(payload["oauth_read"]["token_present"])
+        self.assertFalse(payload["browser_write"]["ready"])
+        self.assertEqual(payload["browser_write"]["reason"], "No session file found")
+        self.assertEqual(payload["recommended_action"], "reauthorize_browser_session")
+
+    def test_structured_api_error_classifies_browser_session_expiry(self):
+        api_module = _load_script(
+            "api_server_structured_error_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": types.SimpleNamespace(
+                    is_session_valid=lambda: {"valid": False, "reason": "No session file found"},
+                    get_heartbeat_state=lambda: {},
+                ),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        payload, status = api_module._json_error(
+            RuntimeError("Browser session expired - redirected to login page. Run './yf browser-login' to refresh your session."),
+            status=500,
+        )
+
+        self.assertEqual(status, 500)
+        self.assertEqual(payload["code"], "yahoo_browser_session_expired")
+        self.assertTrue(payload["action_required"])
+        self.assertEqual(payload["action"], "reauthorize_browser_session")
+        self.assertEqual(payload["auth_type"], "browser_session")
+
     def test_operator_live_state_normalizes_mid_inning_transitions(self):
         api_module = _load_script(
             "api_server_operator_live_state_mid_for_test",
