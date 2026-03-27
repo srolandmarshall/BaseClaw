@@ -14,12 +14,13 @@ from shared import (
     get_connection, get_league, get_league_context, get_team_key,
     get_league_settings,
     OAUTH_FILE, LEAGUE_ID, TEAM_ID, GAME_KEY, DATA_DIR,
-    enrich_with_intel, enrich_with_trends,
+    enrich_with_intel, enrich_with_trends, mlb_fetch,
 )
 
 _AVAILABLE_PLAYERS_CACHE = {}
 _AVAILABLE_PLAYERS_CACHE_TTL = int(os.environ.get("AVAILABLE_PLAYERS_CACHE_TTL_SECONDS", "90"))
 _AVAILABLE_PLAYERS_SNAPSHOT_TTL = int(os.environ.get("AVAILABLE_PLAYERS_SNAPSHOT_TTL_SECONDS", "300"))
+_MLB_TEAM_ABBR_CACHE = {}
 
 
 def _player_name(player):
@@ -78,6 +79,79 @@ def _player_team_abbr(player):
     return ""
 
 
+def _mlb_team_abbr_lookup():
+    cached = _MLB_TEAM_ABBR_CACHE.get("teams")
+    now = time.time()
+    if cached and now - cached[1] <= 3600:
+        return cached[0]
+
+    lookup = {}
+    try:
+        payload = mlb_fetch("/teams?sportId=1")
+    except Exception:
+        payload = {}
+
+    for team in payload.get("teams", []) if isinstance(payload, dict) else []:
+        abbr = str(team.get("abbreviation", "") or "").strip().upper()
+        if not abbr:
+            continue
+        team_id = str(team.get("id", "") or "").strip()
+        team_name = str(team.get("name", "") or "").strip().lower()
+        if team_id:
+            lookup[team_id] = abbr
+        if team_name:
+            lookup[team_name] = abbr
+
+    _MLB_TEAM_ABBR_CACHE["teams"] = (lookup, now)
+    return lookup
+
+
+def _fill_missing_team_abbr(players):
+    missing_ids = []
+    for player in players or []:
+        if not isinstance(player, dict):
+            continue
+        team_abbr = str(player.get("team_abbr", "") or player.get("team", "") or "").strip().upper()
+        if team_abbr:
+            player["team_abbr"] = team_abbr
+            if not player.get("team"):
+                player["team"] = team_abbr
+            continue
+        mlb_id = player.get("mlb_id")
+        if mlb_id:
+            missing_ids.append(str(mlb_id))
+
+    if not missing_ids:
+        return
+
+    try:
+        payload = mlb_fetch("/people?personIds=" + ",".join(sorted(set(missing_ids))) + "&hydrate=currentTeam")
+    except Exception:
+        return
+
+    team_lookup = _mlb_team_abbr_lookup()
+    resolved_by_id = {}
+    for person in payload.get("people", []) if isinstance(payload, dict) else []:
+        person_id = str(person.get("id", "") or "").strip()
+        current_team = person.get("currentTeam", {}) if isinstance(person, dict) else {}
+        team_id = str(current_team.get("id", "") or "").strip()
+        team_name = str(current_team.get("name", "") or "").strip().lower()
+        resolved = team_lookup.get(team_id, "") or team_lookup.get(team_name, "")
+        if person_id and resolved:
+            resolved_by_id[person_id] = resolved
+
+    for player in players or []:
+        if not isinstance(player, dict):
+            continue
+        if str(player.get("team_abbr", "") or "").strip():
+            continue
+        resolved = resolved_by_id.get(str(player.get("mlb_id", "") or "").strip(), "")
+        if resolved:
+            player["team_abbr"] = resolved
+            if not player.get("team"):
+                player["team"] = resolved
+
+
 def _truthy(value):
     return str(value).strip().lower() not in ("0", "false", "no", "off", "")
 
@@ -103,6 +177,7 @@ def _matches_pos_type(player, pos_type):
 def _normalize_available_player(player, availability_type):
     name = _player_name(player)
     positions = _eligible_positions(player)
+    team_abbr = str(_player_team_abbr(player) or "").strip().upper()
     return {
         "name": name,
         "player_id": str(player.get("player_id", "")),
@@ -110,7 +185,8 @@ def _normalize_available_player(player, availability_type):
         "eligible_positions": positions,
         "percent_owned": player.get("percent_owned", 0),
         "status": player.get("status", ""),
-        "team": _player_team_abbr(player),
+        "team": team_abbr,
+        "team_abbr": team_abbr,
         "mlb_id": get_mlb_id(name),
         "availability_type": availability_type,
     }
@@ -156,13 +232,15 @@ def get_available_players(pos_type="B", count=None):
     cached = _AVAILABLE_PLAYERS_CACHE.get(pos_type)
     if cached and now - cached[1] <= _AVAILABLE_PLAYERS_CACHE_TTL:
         players = list(cached[0])
+        _fill_missing_team_abbr(players)
         return players[:limit] if limit is not None else players
 
     if LEAGUE_ID:
         snapshot = _read_available_players_snapshot(pos_type)
         if snapshot is not None:
-            _AVAILABLE_PLAYERS_CACHE[pos_type] = (list(snapshot), now)
             players = list(snapshot)
+            _fill_missing_team_abbr(players)
+            _AVAILABLE_PLAYERS_CACHE[pos_type] = (list(players), now)
             return players[:limit] if limit is not None else players
 
     sc, gm, lg = get_league()
@@ -212,6 +290,7 @@ def get_available_players(pos_type="B", count=None):
             pass
 
     players = list(combined.values())
+    _fill_missing_team_abbr(players)
     players.sort(
         key=lambda p: (
             0 if p.get("availability_type") == "free_agent" else 1,
@@ -253,10 +332,12 @@ def cmd_roster(args, as_json=False):
                     "positions": positions,
                     "status": p.get("status", ""),
                     "team": team_abbr,
+                    "team_abbr": str(team_abbr or "").upper(),
                     "mlb_team": team_abbr,
                     "mlb_id": get_mlb_id(_player_name(p)),
                 }
             )
+        _fill_missing_team_abbr(players)
         if include_intel:
             enrich_with_intel(players)
         return {"players": players}

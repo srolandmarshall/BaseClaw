@@ -383,10 +383,12 @@ def _candidate_free_agents(pos_type, count):
         if not isinstance(player, dict):
             continue
         name = str(player.get("name", "Unknown"))
+        team_abbr = str(player.get("team_abbr") or player.get("team") or player.get("editorial_team_abbr") or "").strip().upper()
         candidates.append({
             "name": name,
             "player_id": str(player.get("player_id", "")),
-            "team": str(player.get("team") or player.get("editorial_team_abbr") or ""),
+            "team": team_abbr,
+            "team_abbr": team_abbr,
             "positions": _normalize_positions(player.get("positions", player.get("eligible_positions", []))),
             "percent_owned": _safe_int(player.get("percent_owned"), 0) or 0,
             "mlb_id": player.get("mlb_id") or get_mlb_id(name),

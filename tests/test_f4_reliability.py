@@ -218,6 +218,7 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
         self.assertEqual(enrich_calls, [])
         self.assertEqual(payload["players"][0]["team"], "MIN")
+        self.assertEqual(payload["players"][0]["team_abbr"], "MIN")
         self.assertEqual(payload["players"][0]["mlb_team"], "MIN")
         self.assertEqual(payload["players"][0]["positions"], ["1B", "Util"])
 
@@ -614,6 +615,7 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(payload["players"][0]["name"], "Hot Bat")
         self.assertEqual(payload["players"][0]["summary"], "5 H, 2 HR, 6 RBI, 1 SB")
         self.assertEqual(payload["players"][0]["team"], "CLE")
+        self.assertEqual(payload["players"][0]["team_abbr"], "CLE")
         self.assertEqual(payload["players"][0]["positions"], ["OF"])
         self.assertEqual(payload["players"][0]["percent_owned"], 14)
         self.assertEqual(payload["players"][0]["mlb_id"], 101)
@@ -1851,7 +1853,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(payload["players"][0]["availability_type"], "free_agent")
         self.assertEqual(payload["players"][1]["availability_type"], "waiver")
         self.assertEqual(payload["players"][0]["team"], "PIT")
+        self.assertEqual(payload["players"][0]["team_abbr"], "PIT")
         self.assertEqual(payload["players"][1]["team"], "SEA")
+        self.assertEqual(payload["players"][1]["team_abbr"], "SEA")
 
     def test_best_available_uses_combined_available_pool(self):
         valuations_module = _module("valuations")
@@ -1926,6 +1930,7 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(payload["players"][0]["name"], "Waiver Arm")
         self.assertEqual(payload["players"][0]["availability_type"], "waiver")
         self.assertEqual(payload["players"][0]["team"], "ATL")
+        self.assertEqual(payload["players"][0]["team_abbr"], "ATL")
 
 
 if __name__ == "__main__":

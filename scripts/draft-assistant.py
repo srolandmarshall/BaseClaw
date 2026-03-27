@@ -459,6 +459,7 @@ def cmd_best_available(args, as_json=False):
                 "name": p.get("name", "?"),
                 "positions": p.get("eligible_positions", []),
                 "team": p.get("team", ""),
+                "team_abbr": p.get("team_abbr", p.get("team", "")),
                 "z_score": round(float(z), 2) if z is not None else None,
                 "mlb_id": get_mlb_id(p.get("name", "")),
                 "availability_type": p.get("availability_type", ""),
