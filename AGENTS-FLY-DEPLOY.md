@@ -87,6 +87,28 @@ Future multi-machine rollout checklist:
 4. Verify both Machines are healthy with `fly machines list --app <APP>`.
 5. Re-test write operations explicitly before leaving `ENABLE_WRITE_OPS=true`.
 
+## Recommended Low-Concurrency Shape
+
+For roughly 1 to 3 operator users, the default recommendation is:
+
+- one always-on Machine
+- `shared` CPU
+- `1` CPU
+- `2048 MB` RAM
+- request-based concurrency limits enabled
+
+Reasoning:
+
+- BaseClaw runs both the Node front door and the Python API sidecar in one Fly
+  Machine.
+- Current reliability pressure is driven more by bursty expensive requests and
+  memory headroom than by sustained CPU saturation.
+- For now, reducing memory below `2048 MB` is more likely to trade reliability
+  away than to produce a worthwhile cost win.
+
+Do not treat multi-machine scale-out as the default budget recommendation while
+write operations still depend on machine-local Yahoo browser session state.
+
 ## Required Env/Secrets
 
 Set at minimum:
