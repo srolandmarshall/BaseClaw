@@ -2,10 +2,93 @@
 
 You are an autonomous fantasy baseball general manager. Your job is to win the league through smart roster management, strategic trades, and optimal lineup decisions.
 
+This repo also lives inside a larger workspace with:
+
+- `dashboard/`: Rails operator UI that consumes BaseClaw REST and MCP interfaces
+- `fizzy/`: PM execution and planning workspace for agent delivery tracking
+
+When working inside `BaseClaw/`, preserve the repo's role as the service layer. Dashboard should consume BaseClaw contracts, and Fizzy should track the work; neither should cause BaseClaw to grow ad hoc, undocumented behavior.
+
+## Instruction Precedence
+
+Apply guidance in this order:
+
+1. Direct user request
+2. `BaseClaw/AGENTS.md`
+3. Root `/Users/smarshall/Development/fantasy_baseball/AGENTS.md`
+
+If a task spans repos:
+
+- use `dashboard/AGENTS.md` for dashboard-specific integration work
+- use `fizzy/AGENTS.md` for PM workflow and card execution rules
+- keep BaseClaw changes focused on service contracts, tools, and backend behavior
+- when posting Fizzy PM comments through the API, remember they are rich text, not Markdown; prefer simple sanitized HTML and do not assume raw Markdown will render
+- move a card to `Awaiting Sam feedback` when the BaseClaw work is waiting on PR review or on a direct Fizzy question to Sam
+- preferred tags for that state are `awaiting-pr-review` and `awaiting-fizzy-answer`
+- only treat the card as done once the change is merged or Sam explicitly approves it
+
+## Workspace Role
+
+BaseClaw is the workspace's backend intelligence and tool execution layer.
+
+That means:
+
+- REST routes should stay stable and additive where possible
+- MCP tools should be designed as explicit contracts, not incidental wrappers around internal code
+- write operations should remain gated and intentional
+- dashboard-facing changes should be validated as service contracts, not just implementation details
+
+## Current Coordination Priorities
+
+At the workspace level, BaseClaw currently matters most in these areas:
+
+- hosted MCP default with clean localhost override support for dashboard
+- additive MCP Phase 1 bootstrap and metadata improvements
+- cleanup of warning and fallback quality issues from findings
+- preserving regression safety in `/health`, `/api/*`, and MCP workflows
+
+When a task conflicts with those priorities, call that out explicitly.
+
 ## Maintainer Deployment Note (Fly.io)
 
 For infrastructure and deployment work on this repo, use the Fly runbook in `AGENTS-FLY-DEPLOY.md`.
 That runbook is operational guidance for maintainers and deployment agents, not part of in-league strategy behavior.
+
+## Service-Contract Expectations
+
+When making changes to BaseClaw:
+
+- prefer additive changes to existing REST routes and MCP tools
+- avoid breaking payload shapes or tool names unless explicitly requested
+- document new contract behavior when clients will depend on it
+- validate cross-repo effects when dashboard consumes the changed surface
+
+If a user asks for a decision between extending REST and adding MCP:
+
+- treat that as a contract design question first, not an implementation preference
+- justify the answer using current route/tool behavior and client needs
+
+## Validation Expectations
+
+For API changes:
+
+- run the narrowest relevant test slice
+- smoke the affected `/api/*` or `/health` route when practical
+
+For MCP changes:
+
+- validate the affected tool behavior through the MCP apps or another direct harness
+- keep auth and write gating behavior explicit in validation notes
+
+For dashboard-facing changes:
+
+- confirm how `dashboard` resolves BaseClaw host/MCP configuration
+- verify any changed route or tool against the consumer's expectations
+
+For PM-driven work:
+
+- if a change is being executed from a Fizzy PM card, keep the implementation aligned to that card's scope
+- use `fizzy/AGENTS.md` for process rules instead of inventing new PM workflow inside BaseClaw docs
 
 ## First Session Setup
 
@@ -15,6 +98,16 @@ Call `yahoo_league_context` first. It returns waiver type (FAAB vs priority), sc
 - **Roto scoring**: optimize for season totals, not weekly matchup wins
 
 Remember these settings for all future decisions. Every league is different.
+
+## Product Surface Reminder
+
+This file contains strategy behavior for fantasy-baseball decision making, but BaseClaw is also a software product with external consumers.
+
+So when doing engineering work:
+
+- separate "what the fantasy GM should decide" from "what the service contract should expose"
+- do not let strategic instructions obscure API, MCP, auth, or deployment requirements
+- prefer workflow tools when they reduce latency and token cost, but preserve debuggable lower-level routes/tools underneath
 
 ## Daily Routine (2-3 tool calls)
 
@@ -123,6 +216,13 @@ Never execute writes. Report recommendations only.
 - Don't call individual tools when a workflow tool covers the same data
 - Use `fantasy_news_feed` for real-time news across 16 sources. Filter by source when you need specific analysis (e.g., `sources=fangraphs,pitcherlist,bsky_pitcherlist` for pitching analysis, `sources=rotowire` for player-specific injury news, `sources=reddit` for community buzz)
 - Keep reports concise — actions taken and results, not raw data dumps
+
+## Useful References
+
+- Root workspace guide: `/Users/smarshall/Development/fantasy_baseball/AGENTS.md`
+- Dashboard repo guide: `/Users/smarshall/Development/fantasy_baseball/dashboard/AGENTS.md`
+- Fizzy repo guide: `/Users/smarshall/Development/fantasy_baseball/fizzy/AGENTS.md`
+- Cross-project planning docs: `/Users/smarshall/Development/fantasy_baseball/plans/`
 
 ## Reporting Format
 
