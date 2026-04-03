@@ -28,6 +28,8 @@ from shared import (
 
 from yahoo_browser import is_scope_error as _is_scope_error, write_method as _write_method
 
+_MLB_TEAM_ABBR_CACHE = {}
+
 
 def get_db():
     """Get SQLite connection with tables initialized"""
@@ -109,14 +111,87 @@ def team_plays_today(team_name, schedule):
 
 def get_player_team(player):
     """Extract MLB team name from a Yahoo roster player dict"""
-    # Yahoo roster entries may have editorial_team_full_name or editorial_team_abbr
-    team_name = player.get("editorial_team_full_name", "")
-    if not team_name:
-        team_name = player.get("editorial_team_abbr", "")
-    if not team_name:
-        # Try name field patterns
-        team_name = player.get("team", "")
-    return team_name
+    # Live roster payloads are inconsistent across Yahoo surfaces. Prefer the
+    # normalized team fields when present, then fall back to Yahoo editorial fields.
+    for key in ("team_abbr", "team", "editorial_team_full_name", "editorial_team_abbr"):
+        value = player.get(key, "")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _mlb_team_abbr_lookup():
+    cached = _MLB_TEAM_ABBR_CACHE.get("teams")
+    today = date.today().isoformat()
+    if cached and cached.get("date") == today:
+        return cached.get("lookup", {})
+
+    lookup = {}
+    try:
+        payload = mlb_fetch("/teams?sportId=1")
+    except Exception:
+        payload = {}
+
+    for team in payload.get("teams", []) if isinstance(payload, dict) else []:
+        abbr = str(team.get("abbreviation", "") or "").strip().upper()
+        if not abbr:
+            continue
+        team_id = str(team.get("id", "") or "").strip()
+        team_name = str(team.get("name", "") or "").strip().lower()
+        if team_id:
+            lookup[team_id] = abbr
+        if team_name:
+            lookup[team_name] = abbr
+
+    _MLB_TEAM_ABBR_CACHE["teams"] = {"date": today, "lookup": lookup}
+    return lookup
+
+
+def normalize_roster_team_fields(players):
+    """Populate missing MLB team abbreviations for sparse Yahoo roster payloads."""
+    missing_ids = []
+    for player in players or []:
+        if not isinstance(player, dict):
+            continue
+        team_abbr = str(get_player_team(player) or "").strip().upper()
+        if team_abbr:
+            player["team_abbr"] = team_abbr
+            player["team"] = team_abbr
+            continue
+        mlb_id = get_mlb_id(player.get("name", ""))
+        if mlb_id:
+            player["_mlb_id"] = str(mlb_id)
+            missing_ids.append(str(mlb_id))
+
+    if not missing_ids:
+        return
+
+    try:
+        payload = mlb_fetch("/people?personIds=" + ",".join(sorted(set(missing_ids))) + "&hydrate=currentTeam")
+    except Exception:
+        return
+
+    team_lookup = _mlb_team_abbr_lookup()
+    resolved_by_id = {}
+    for person in payload.get("people", []) if isinstance(payload, dict) else []:
+        person_id = str(person.get("id", "") or "").strip()
+        current_team = person.get("currentTeam", {}) if isinstance(person, dict) else {}
+        team_id = str(current_team.get("id", "") or "").strip()
+        team_name = str(current_team.get("name", "") or "").strip().lower()
+        resolved = team_lookup.get(team_id, "") or team_lookup.get(team_name, "")
+        if person_id and resolved:
+            resolved_by_id[person_id] = resolved
+
+    for player in players or []:
+        if not isinstance(player, dict):
+            continue
+        if get_player_team(player):
+            continue
+        mlb_id = str(player.get("_mlb_id", "") or "").strip()
+        resolved = resolved_by_id.get(mlb_id, "")
+        if resolved:
+            player["team_abbr"] = resolved
+            player["team"] = resolved
 
 
 def get_player_position(player):
@@ -343,6 +418,8 @@ def cmd_lineup_optimize(args, as_json=False, include_intel=True):
             return {"games_today": 0, "active_off_day": [], "bench_playing": [], "il_players": [], "suggested_swaps": [], "applied": False}
         print("Roster is empty (predraft or preseason)")
         return
+
+    normalize_roster_team_fields(roster)
 
     if not as_json:
         print("Fetching today's MLB schedule...")
