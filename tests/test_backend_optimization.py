@@ -234,6 +234,86 @@ class BackendOptimizationTests(unittest.TestCase):
         self.assertEqual(payload["active_off_day"], [])
         self.assertEqual(payload["bench_playing"][0]["name"], "Bench Red Sox")
 
+    def test_cmd_lineup_optimize_resolves_team_fields_from_sparse_live_roster_shape(self):
+        shared = _shared_stub()
+        shared.TEAM_ALIASES = {
+            "PHI": "Philadelphia Phillies",
+            "ATL": "Atlanta Braves",
+        }
+        shared.normalize_team_name = lambda value: (value or "").strip().lower()
+        shared.mlb_fetch = lambda endpoint: (
+            {
+                "people": [
+                    {"id": "mlb-Live Shape Starter", "currentTeam": {"id": 143, "name": "Philadelphia Phillies"}},
+                    {"id": "mlb-Live Shape Bench", "currentTeam": {"id": 144, "name": "Atlanta Braves"}},
+                ]
+            }
+            if endpoint.startswith("/people?personIds=")
+            else {
+                "teams": [
+                    {"id": 143, "name": "Philadelphia Phillies", "abbreviation": "PHI"},
+                    {"id": 144, "name": "Atlanta Braves", "abbreviation": "ATL"},
+                ]
+            }
+        )
+
+        module = _load_script(
+            "season_manager_lineup_live_shape_test",
+            "season-manager.py",
+            {
+                "shared": shared,
+                "yahoo_fantasy_api": _module("yahoo_fantasy_api"),
+                "statsapi": None,
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda name, *args, **kwargs: "mlb-" + str(name)),
+                "yahoo_browser": types.SimpleNamespace(
+                    is_scope_error=lambda *_args, **_kwargs: False,
+                    write_method=lambda *_args, **_kwargs: None,
+                ),
+                "valuations": types.SimpleNamespace(
+                    get_player_zscore=lambda name: {"tier": "Solid", "z_final": 1.2}
+                ),
+            },
+        )
+
+        class FakeTeam:
+            def roster(self):
+                return [
+                    {
+                        "player_id": "10",
+                        "name": "Live Shape Starter",
+                        "selected_position": "C",
+                        "eligible_positions": ["C", "Util"],
+                        "status": "",
+                    },
+                    {
+                        "player_id": "11",
+                        "name": "Live Shape Bench",
+                        "selected_position": "BN",
+                        "eligible_positions": ["1B", "Util"],
+                        "status": "",
+                    },
+                ]
+
+        module.get_league_context = lambda: (None, None, None, FakeTeam())
+        module.get_todays_schedule = lambda: [{"away_name": "Philadelphia Phillies", "home_name": "Atlanta Braves"}]
+
+        saved = sys.modules.get("valuations")
+        sys.modules["valuations"] = types.SimpleNamespace(
+            get_player_zscore=lambda name: {"tier": "Solid", "z_final": 1.2}
+        )
+        try:
+            payload = module.cmd_lineup_optimize([], as_json=True, include_intel=False)
+        finally:
+            if saved is None:
+                sys.modules.pop("valuations", None)
+            else:
+                sys.modules["valuations"] = saved
+
+        self.assertEqual(payload["games_today"], 1)
+        self.assertEqual(payload["active_off_day"], [])
+        self.assertEqual(payload["bench_playing"][0]["name"], "Live Shape Bench")
+        self.assertEqual(payload["bench_playing"][0]["team"], "ATL")
+
     def test_cmd_best_available_uses_lightweight_cached_lookup_path(self):
         shared = _shared_stub()
         enrich_calls = []
