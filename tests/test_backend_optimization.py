@@ -151,12 +151,88 @@ class BackendOptimizationTests(unittest.TestCase):
         module.get_league_context = lambda: (None, None, None, FakeTeam())
         module.get_todays_schedule = lambda: [{"away_name": "Play", "home_name": "Elsewhere"}]
 
-        payload = module.cmd_lineup_optimize([], as_json=True, include_intel=False)
+        saved = sys.modules.get("valuations")
+        sys.modules["valuations"] = types.SimpleNamespace(
+            get_player_zscore=lambda name: {"tier": "Solid", "z_final": 1.2}
+        )
+        try:
+            payload = module.cmd_lineup_optimize([], as_json=True, include_intel=False)
+        finally:
+            if saved is None:
+                sys.modules.pop("valuations", None)
+            else:
+                sys.modules["valuations"] = saved
 
         self.assertEqual(enrich_calls, [])
         self.assertEqual(len(payload["active_off_day"]), 1)
         self.assertEqual(len(payload["bench_playing"]), 1)
         self.assertEqual(len(payload["suggested_swaps"]), 1)
+
+    def test_cmd_lineup_optimize_matches_abbreviations_against_full_schedule_names(self):
+        shared = _shared_stub()
+        shared.TEAM_ALIASES = {
+            "NYY": "New York Yankees",
+            "BOS": "Boston Red Sox",
+        }
+        shared.normalize_team_name = lambda value: (value or "").strip().lower()
+
+        module = _load_script(
+            "season_manager_lineup_abbr_test",
+            "season-manager.py",
+            {
+                "shared": shared,
+                "yahoo_fantasy_api": _module("yahoo_fantasy_api"),
+                "statsapi": None,
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda name, *args, **kwargs: "mlb-" + str(name)),
+                "yahoo_browser": types.SimpleNamespace(
+                    is_scope_error=lambda *_args, **_kwargs: False,
+                    write_method=lambda *_args, **_kwargs: None,
+                ),
+                "valuations": types.SimpleNamespace(
+                    get_player_zscore=lambda name: {"tier": "Solid", "z_final": 1.2}
+                ),
+            },
+        )
+
+        class FakeTeam:
+            def roster(self):
+                return [
+                    {
+                        "player_id": "10",
+                        "name": "Active Yankee",
+                        "selected_position": "OF",
+                        "eligible_positions": ["OF", "Util"],
+                        "editorial_team_abbr": "NYY",
+                        "status": "",
+                    },
+                    {
+                        "player_id": "11",
+                        "name": "Bench Red Sox",
+                        "selected_position": "BN",
+                        "eligible_positions": ["OF", "Util"],
+                        "editorial_team_abbr": "BOS",
+                        "status": "",
+                    },
+                ]
+
+        module.get_league_context = lambda: (None, None, None, FakeTeam())
+        module.get_todays_schedule = lambda: [{"away_name": "New York Yankees", "home_name": "Boston Red Sox"}]
+
+        saved = sys.modules.get("valuations")
+        sys.modules["valuations"] = types.SimpleNamespace(
+            get_player_zscore=lambda name: {"tier": "Solid", "z_final": 1.2}
+        )
+        try:
+            payload = module.cmd_lineup_optimize([], as_json=True, include_intel=False)
+        finally:
+            if saved is None:
+                sys.modules.pop("valuations", None)
+            else:
+                sys.modules["valuations"] = saved
+
+        self.assertEqual(payload["games_today"], 1)
+        self.assertEqual(payload["active_off_day"], [])
+        self.assertEqual(payload["bench_playing"][0]["name"], "Bench Red Sox")
 
     def test_cmd_best_available_uses_lightweight_cached_lookup_path(self):
         shared = _shared_stub()
