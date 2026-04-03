@@ -1662,11 +1662,16 @@ def cmd_who_owns(args, as_json=False):
             return {"error": "Missing player_id"}
         print("Usage: who-owns PLAYER_ID")
         return
-    player_id = args[0]
-    player_key = GAME_KEY + ".p." + str(player_id)
+    requested_id = str(args[0]).strip()
+    player_id = requested_id.split(".p.")[-1] if ".p." in requested_id else requested_id
+    player_key = GAME_KEY + ".p." + player_id
     sc, gm, lg = get_league()
     try:
-        ownership = lg.ownership([player_key])
+        ownership = lg.ownership([player_id])
+        if not ownership and requested_id != player_id:
+            ownership = lg.ownership([requested_id])
+        if not ownership:
+            ownership = lg.ownership([player_key])
         if not ownership:
             if as_json:
                 return {
@@ -1676,7 +1681,7 @@ def cmd_who_owns(args, as_json=False):
                 }
             print("No ownership info for " + player_key)
             return
-        info = ownership.get(player_key, ownership.get(player_id, {}))
+        info = ownership.get(player_key, ownership.get(player_id, ownership.get(requested_id, {})))
         if not info and len(ownership) == 1:
             info = list(ownership.values())[0]
         own_type = info.get("ownership_type", "unknown")
