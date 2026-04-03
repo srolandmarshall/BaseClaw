@@ -31,3 +31,5 @@ data/projections_*.csv
 scripts/openclaw-skill/.injury-state.json
 research_yahoo_write_workaround/
 /plans
+#vscode settings
+.vscode/

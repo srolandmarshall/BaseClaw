@@ -14,6 +14,21 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+function checkPythonHealth(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = http.request("http://localhost:8766/api/health", { method: "GET", timeout: 3000 }, (res) => {
+      res.resume();
+      resolve((res.statusCode || 500) < 500);
+    });
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(false);
+    });
+    req.on("error", () => resolve(false));
+    req.end();
+  });
+}
+
 async function handleMcp(req: Request, res: Response): Promise<void> {
   const server = createServer();
   const transport = new StreamableHTTPServerTransport({
@@ -83,8 +98,18 @@ async function main() {
       res.status(200).json({ ok: true, service: "baseclaw", health: "/health", mcp: "/mcp" });
     });
 
-    app.get("/health", (_req, res) => {
-      res.json({ ok: true, writes_enabled: process.env.ENABLE_WRITE_OPS === "true" });
+    app.get("/health", async (_req, res) => {
+      const python_ok = await checkPythonHealth();
+      const payload = {
+        ok: python_ok,
+        python_ok,
+        writes_enabled: process.env.ENABLE_WRITE_OPS === "true",
+      };
+      if (!python_ok) {
+        res.status(503).json(payload);
+        return;
+      }
+      res.json(payload);
     });
 
     app.use(mcpAuthRouter({
