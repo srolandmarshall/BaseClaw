@@ -107,6 +107,28 @@ def _dashboard_cache_delete_prefix(prefix):
         pass
 
 
+def _invalidate_team_state_caches():
+    for prefix in (
+        "roster",
+        "lineup-optimize",
+        "injury-report",
+        "waiver-analyze",
+        "hot-bat-free-agents",
+        "hot-hand-free-agent-pitchers",
+        "workflow-morning-briefing",
+        "workflow-league-landscape",
+        "workflow-roster-health",
+        "workflow-waiver-recommendations",
+    ):
+        _dashboard_cache_delete_prefix(prefix)
+
+
+def _mutation_succeeded(result):
+    if not isinstance(result, dict):
+        return True
+    return bool(result.get("success", True))
+
+
 def _safe_int(value, default=None):
     if value is None or value == "":
         return default
@@ -1737,6 +1759,8 @@ def api_add():
         if not player_id:
             return jsonify({"error": "Missing player_id"}), 400
         result = yahoo_fantasy.cmd_add([player_id], as_json=True)
+        if _mutation_succeeded(result):
+            _invalidate_team_state_caches()
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1752,6 +1776,8 @@ def api_drop():
         if not player_id:
             return jsonify({"error": "Missing player_id"}), 400
         result = yahoo_fantasy.cmd_drop([player_id], as_json=True)
+        if _mutation_succeeded(result):
+            _invalidate_team_state_caches()
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1770,6 +1796,8 @@ def api_swap():
         if not add_id or not drop_id:
             return jsonify({"error": "Missing add_id and/or drop_id"}), 400
         result = yahoo_fantasy.cmd_swap([add_id, drop_id], as_json=True)
+        if _mutation_succeeded(result):
+            _invalidate_team_state_caches()
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -2198,7 +2226,12 @@ def api_value():
             name = request.args.get("name", "")
         if not name:
             return jsonify({"error": "Missing player_name parameter"}), 400
+        cache_key = ("value", str(name).strip().lower())
+        cached = _dashboard_cache_get(cache_key, 300)
+        if cached is not None:
+            return jsonify(cached)
         result = valuations.cmd_value([name], as_json=True)
+        _dashboard_cache_set(cache_key, result)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -2210,6 +2243,7 @@ def api_projections_update():
         data = request.get_json(silent=True) or {}
         proj_type = data.get("proj_type", "steamer")
         result = valuations.ensure_projections(proj_type=proj_type, force=True)
+        _dashboard_cache_delete_prefix("value")
         return jsonify({"status": "ok", "result": result})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -2321,7 +2355,12 @@ def api_category_check():
 @app.route("/api/injury-report")
 def api_injury_report():
     try:
+        cache_key = ("injury-report", date.today().isoformat())
+        cached = _dashboard_cache_get(cache_key, 30)
+        if cached is not None:
+            return jsonify(cached)
         result = season_manager.cmd_injury_report([], as_json=True)
+        _dashboard_cache_set(cache_key, result)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -2330,9 +2369,14 @@ def api_injury_report():
 @app.route("/api/waiver-analyze")
 def api_waiver_analyze():
     try:
-        pos_type = request.args.get("pos_type", "B")
+        pos_type = request.args.get("pos_type", "B").upper()
         count = request.args.get("count", "15")
+        cache_key = ("waiver-analyze", date.today().isoformat(), pos_type, str(count))
+        cached = _dashboard_cache_get(cache_key, 30)
+        if cached is not None:
+            return jsonify(cached)
         result = season_manager.cmd_waiver_analyze([pos_type, count], as_json=True)
+        _dashboard_cache_set(cache_key, result)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -2453,6 +2497,8 @@ def api_accept_trade():
         if note:
             args.append(note)
         result = season_manager.cmd_accept_trade(args, as_json=True)
+        if _mutation_succeeded(result):
+            _invalidate_team_state_caches()
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -2492,6 +2538,8 @@ def api_set_lineup():
         if not args:
             return jsonify({"error": "No valid moves provided"}), 400
         result = season_manager.cmd_set_lineup(args, as_json=True)
+        if _mutation_succeeded(result):
+            _invalidate_team_state_caches()
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -2512,6 +2560,8 @@ def api_waiver_claim():
         if faab is not None:
             args.append(str(faab))
         result = yahoo_fantasy.cmd_waiver_claim(args, as_json=True)
+        if _mutation_succeeded(result):
+            _invalidate_team_state_caches()
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -2530,6 +2580,8 @@ def api_waiver_claim_swap():
         if faab is not None:
             args.append(str(faab))
         result = yahoo_fantasy.cmd_waiver_claim_swap(args, as_json=True)
+        if _mutation_succeeded(result):
+            _invalidate_team_state_caches()
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500

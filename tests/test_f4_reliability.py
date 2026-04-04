@@ -1685,6 +1685,323 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(payload["issues"], [{"severity": "info", "count": 2}])
         self.assertEqual(payload["roster"], {"players": [{"name": "Bench Bat"}]})
 
+    def test_api_value_caches_payload_by_normalized_player_name(self):
+        api_module = _load_script(
+            "api_server_value_cache_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        calls = []
+        cached_payloads = []
+        api_module.request.args = {"player_name": " Aaron Judge "}
+        api_module._dashboard_cache_get = lambda *_args, **_kwargs: None
+        api_module._dashboard_cache_set = lambda key, payload: cached_payloads.append((key, payload))
+        api_module.valuations.cmd_value = lambda args=None, as_json=False: calls.append((args or [], as_json)) or {"players": [{"name": args[0]}]}
+
+        payload = api_module.api_value()
+
+        self.assertEqual(calls, [([" Aaron Judge "], True)])
+        self.assertEqual(payload["players"], [{"name": " Aaron Judge "}])
+        self.assertEqual(cached_payloads[0][0], ("value", "aaron judge"))
+        self.assertIs(cached_payloads[0][1], payload)
+
+    def test_api_value_uses_cached_payload_when_available(self):
+        api_module = _load_script(
+            "api_server_value_cache_hit_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        expected = {"players": [{"name": "Aaron Judge"}], "cached": True}
+        api_module.request.args = {"player_name": "Aaron Judge"}
+        api_module._dashboard_cache_get = lambda *_args, **_kwargs: expected
+        api_module._dashboard_cache_set = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not write cache"))
+        api_module.valuations.cmd_value = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not recompute value"))
+
+        payload = api_module.api_value()
+
+        self.assertIs(payload, expected)
+
+    def test_api_injury_report_caches_payload(self):
+        api_module = _load_script(
+            "api_server_injury_report_cache_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        calls = []
+        cached_payloads = []
+        api_module._dashboard_cache_get = lambda *_args, **_kwargs: None
+        api_module._dashboard_cache_set = lambda key, payload: cached_payloads.append((key, payload))
+        api_module.season_manager.cmd_injury_report = lambda args=None, as_json=False: calls.append((args or [], as_json)) or {"injured_active": []}
+
+        payload = api_module.api_injury_report()
+
+        self.assertEqual(calls, [([], True)])
+        self.assertEqual(payload, {"injured_active": []})
+        self.assertEqual(cached_payloads[0][0][0], "injury-report")
+        self.assertIs(cached_payloads[0][1], payload)
+
+    def test_api_injury_report_uses_cached_payload_when_available(self):
+        api_module = _load_script(
+            "api_server_injury_report_cache_hit_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        expected = {"injured_active": [{"name": "Cached"}], "cached": True}
+        api_module._dashboard_cache_get = lambda *_args, **_kwargs: expected
+        api_module._dashboard_cache_set = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not write cache"))
+        api_module.season_manager.cmd_injury_report = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not recompute injury report"))
+
+        payload = api_module.api_injury_report()
+
+        self.assertIs(payload, expected)
+
+    def test_api_waiver_analyze_caches_payload_by_pos_type_and_count(self):
+        api_module = _load_script(
+            "api_server_waiver_analyze_cache_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        calls = []
+        cached_payloads = []
+        api_module.request.args = {"pos_type": "p", "count": "7"}
+        api_module._dashboard_cache_get = lambda *_args, **_kwargs: None
+        api_module._dashboard_cache_set = lambda key, payload: cached_payloads.append((key, payload))
+        api_module.season_manager.cmd_waiver_analyze = lambda args=None, as_json=False: calls.append((args or [], as_json)) or {"recommendations": []}
+
+        payload = api_module.api_waiver_analyze()
+
+        self.assertEqual(calls, [(["P", "7"], True)])
+        self.assertEqual(payload, {"recommendations": []})
+        self.assertEqual(cached_payloads[0][0][0], "waiver-analyze")
+        self.assertEqual(cached_payloads[0][0][2:], ("P", "7"))
+        self.assertIs(cached_payloads[0][1], payload)
+
+    def test_api_waiver_analyze_uses_cached_payload_when_available(self):
+        api_module = _load_script(
+            "api_server_waiver_analyze_cache_hit_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        expected = {"recommendations": [{"name": "Cached"}], "cached": True}
+        api_module.request.args = {"pos_type": "B", "count": "5"}
+        api_module._dashboard_cache_get = lambda *_args, **_kwargs: expected
+        api_module._dashboard_cache_set = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not write cache"))
+        api_module.season_manager.cmd_waiver_analyze = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not recompute waiver analysis"))
+
+        payload = api_module.api_waiver_analyze()
+
+        self.assertIs(payload, expected)
+
+    def test_api_set_lineup_invalidates_team_state_caches(self):
+        api_module = _load_script(
+            "api_server_set_lineup_cache_invalidation_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        invalidations = []
+        api_module.request.get_json = lambda silent=True: {"moves": [{"player_id": "123", "position": "BN"}]}
+        api_module._invalidate_team_state_caches = lambda: invalidations.append("team-state")
+        api_module.season_manager.cmd_set_lineup = lambda args=None, as_json=False: {"success": True, "moves": args or []}
+
+        payload = api_module.api_set_lineup()
+
+        self.assertEqual(invalidations, ["team-state"])
+        self.assertEqual(payload["moves"], ["123:BN"])
+
+    def test_api_set_lineup_skips_team_state_invalidation_on_failure(self):
+        api_module = _load_script(
+            "api_server_set_lineup_cache_failure_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        invalidations = []
+        api_module.request.get_json = lambda silent=True: {"moves": [{"player_id": "123", "position": "BN"}]}
+        api_module._invalidate_team_state_caches = lambda: invalidations.append("team-state")
+        api_module.season_manager.cmd_set_lineup = lambda args=None, as_json=False: {"success": False, "moves": args or [], "message": "failed"}
+
+        payload = api_module.api_set_lineup()
+
+        self.assertEqual(invalidations, [])
+        self.assertFalse(payload["success"])
+
+    def test_api_accept_trade_invalidates_team_state_caches_on_success(self):
+        api_module = _load_script(
+            "api_server_accept_trade_cache_invalidation_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        invalidations = []
+        api_module.request.get_json = lambda silent=True: {"transaction_key": "tx-1"}
+        api_module._invalidate_team_state_caches = lambda: invalidations.append("team-state")
+        api_module.season_manager.cmd_accept_trade = lambda args=None, as_json=False: {"success": True, "transaction_key": (args or [""])[0]}
+
+        payload = api_module.api_accept_trade()
+
+        self.assertEqual(invalidations, ["team-state"])
+        self.assertEqual(payload["transaction_key"], "tx-1")
+
     def test_auth_status_reports_oauth_and_browser_readiness(self):
         shared_module = _shared_stub()
         shared_module.OAUTH_FILE = "/tmp/yahoo_oauth.json"
