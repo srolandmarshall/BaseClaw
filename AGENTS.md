@@ -75,6 +75,11 @@ For API changes:
 - run the narrowest relevant test slice
 - smoke the affected `/api/*` or `/health` route when practical
 
+For post-merge local workflow:
+
+- after a successful BaseClaw PR merge, switch back to `main` and pull the latest changes before continuing work
+- after pulling merged BaseClaw changes, redeploy or restart the local BaseClaw environment so local testing reflects the merged code, not the pre-merge process state
+
 For MCP changes:
 
 - validate the affected tool behavior through the MCP apps or another direct harness
