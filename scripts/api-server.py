@@ -3467,8 +3467,8 @@ def workflow_waiver_recommendations():
         return jsonify(cached)
     try:
         cat_check = _safe_call(season_manager.cmd_category_check)
-        waiver_b = _safe_call(season_manager.cmd_waiver_analyze, ["B", count])
-        waiver_p = _safe_call(season_manager.cmd_waiver_analyze, ["P", count])
+        waiver_b = _safe_waiver_analyze("B", count, include_intel=False)
+        waiver_p = _safe_waiver_analyze("P", count, include_intel=False)
         roster = _safe_call(yahoo_fantasy.cmd_roster)
 
         pairs = _synthesize_waiver_pairs(waiver_b, waiver_p)

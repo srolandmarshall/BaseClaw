@@ -94,6 +94,7 @@ Relevant routes:
 - `workflow_morning_briefing()`
 - `workflow_roster_health()`
 - `workflow_league_landscape()`
+- `workflow_waiver_recommendations()`
 
 These call multiple command functions in one request, multiplying cold-load
 memory pressure in a single Python process.
@@ -139,6 +140,10 @@ automatically inherit the heaviest lineup/intel defaults:
 
 The workflow routes now explicitly ask for lightweight lineup/injury/waiver data
 by default instead of inheriting the heaviest JSON enrichment path.
+
+I also added API-level regression tests around these workflow routes so the
+lightweight helper usage and warm-cache short-circuit behavior are enforced in
+`tests/test_f4_reliability.py`, not just verified manually.
 
 ## Effect of the Lightweight Workflow Change
 
