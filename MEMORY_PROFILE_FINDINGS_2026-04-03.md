@@ -176,6 +176,22 @@ spike, which suggests:
 Keep workflow aggregates on lightweight payloads by default unless the specific
 consumer truly renders the richer intel fields.
 
+Also add short-lived caching on the heavy aggregate workflow routes so repeated
+dashboard refreshes do not re-trigger the full fan-out immediately.
+
+Observed after adding short-lived workflow caching locally:
+
+- `/api/workflow/morning-briefing`
+  - first hit: about `55114.9 ms`
+  - second hit: about `8.9 ms`
+- `/api/workflow/roster-health`
+  - first hit: about `3197.4 ms`
+  - second hit: about `6.4 ms`
+
+That does not reduce the first cold peak, but it should materially reduce
+repeat churn, repeated latency, and the chance of back-to-back heavy workflow
+requests stacking into an OOM event.
+
 ### Likely deeper follow-up
 
 Profile and reduce cold-load memory inside:
@@ -208,4 +224,3 @@ docker exec baseclaw python3 /app/scripts/profile_dashboard_routes.py '/api/inju
 docker exec baseclaw python3 /app/scripts/profile_dashboard_routes.py '/api/waiver-analyze?pos_type=B&count=5'
 docker exec baseclaw python3 /app/scripts/profile_dashboard_routes.py '/api/intel/busts?pos_type=B&count=20'
 ```
-

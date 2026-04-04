@@ -3283,6 +3283,10 @@ def _synthesize_morning_actions(injury, lineup, whats_new, waiver_b, waiver_p):
 
 @app.route("/api/workflow/morning-briefing")
 def workflow_morning_briefing():
+    cache_key = ("workflow-morning-briefing", date.today().isoformat())
+    cached = _dashboard_cache_get(cache_key, 30)
+    if cached is not None:
+        return jsonify(cached)
     try:
         injury = _safe_injury_report(include_intel=False)
         lineup = _safe_lineup_preview(include_intel=False)
@@ -3304,7 +3308,7 @@ def workflow_morning_briefing():
         except Exception:
             pass
 
-        return jsonify({
+        payload = {
             "action_items": action_items,
             "injury": injury,
             "lineup": lineup,
@@ -3314,13 +3318,19 @@ def workflow_morning_briefing():
             "waiver_batters": waiver_b,
             "waiver_pitchers": waiver_p,
             "edit_date": edit_date,
-        })
+        }
+        _dashboard_cache_set(cache_key, payload)
+        return jsonify(payload)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/workflow/league-landscape")
 def workflow_league_landscape():
+    cache_key = ("workflow-league-landscape", date.today().isoformat())
+    cached = _dashboard_cache_get(cache_key, 60)
+    if cached is not None:
+        return jsonify(cached)
     try:
         standings = _safe_call(yahoo_fantasy.cmd_standings)
         pace = _safe_call(season_manager.cmd_season_pace)
@@ -3330,7 +3340,7 @@ def workflow_league_landscape():
         trade_finder = _safe_call(season_manager.cmd_trade_finder)
         scoreboard = _safe_call(yahoo_fantasy.cmd_scoreboard)
 
-        return jsonify({
+        payload = {
             "standings": standings,
             "pace": pace,
             "power_rankings": power,
@@ -3338,7 +3348,9 @@ def workflow_league_landscape():
             "transactions": transactions,
             "trade_finder": trade_finder,
             "scoreboard": scoreboard,
-        })
+        }
+        _dashboard_cache_set(cache_key, payload)
+        return jsonify(payload)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -3396,6 +3408,10 @@ def _synthesize_roster_issues(injury, lineup, roster, busts):
 
 @app.route("/api/workflow/roster-health")
 def workflow_roster_health():
+    cache_key = ("workflow-roster-health", date.today().isoformat())
+    cached = _dashboard_cache_get(cache_key, 30)
+    if cached is not None:
+        return jsonify(cached)
     try:
         injury = _safe_injury_report(include_intel=False)
         lineup = _safe_lineup_preview(include_intel=False)
@@ -3404,13 +3420,15 @@ def workflow_roster_health():
 
         issues = _synthesize_roster_issues(injury, lineup, roster, busts)
 
-        return jsonify({
+        payload = {
             "issues": issues,
             "injury": injury,
             "lineup": lineup,
             "roster": roster,
             "busts": busts,
-        })
+        }
+        _dashboard_cache_set(cache_key, payload)
+        return jsonify(payload)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -3442,8 +3460,12 @@ def _synthesize_waiver_pairs(waiver_b, waiver_p):
 
 @app.route("/api/workflow/waiver-recommendations")
 def workflow_waiver_recommendations():
+    count = request.args.get("count", "5")
+    cache_key = ("workflow-waiver-recommendations", date.today().isoformat(), str(count))
+    cached = _dashboard_cache_get(cache_key, 30)
+    if cached is not None:
+        return jsonify(cached)
     try:
-        count = request.args.get("count", "5")
         cat_check = _safe_call(season_manager.cmd_category_check)
         waiver_b = _safe_call(season_manager.cmd_waiver_analyze, ["B", count])
         waiver_p = _safe_call(season_manager.cmd_waiver_analyze, ["P", count])
@@ -3451,13 +3473,15 @@ def workflow_waiver_recommendations():
 
         pairs = _synthesize_waiver_pairs(waiver_b, waiver_p)
 
-        return jsonify({
+        payload = {
             "pairs": pairs,
             "category_check": cat_check,
             "waiver_batters": waiver_b,
             "waiver_pitchers": waiver_p,
             "roster": roster,
-        })
+        }
+        _dashboard_cache_set(cache_key, payload)
+        return jsonify(payload)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
