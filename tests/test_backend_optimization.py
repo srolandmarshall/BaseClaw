@@ -314,6 +314,186 @@ class BackendOptimizationTests(unittest.TestCase):
         self.assertEqual(payload["bench_playing"][0]["name"], "Live Shape Bench")
         self.assertEqual(payload["bench_playing"][0]["team"], "ATL")
 
+    def test_cmd_injury_report_can_skip_intel_for_json_payload(self):
+        enrich_calls = []
+        shared = _shared_stub()
+        shared.enrich_with_intel = lambda players, *args, **kwargs: enrich_calls.append(len(players))
+        shared.fetch_mlb_injuries = lambda: []
+
+        module = _load_script(
+            "season_manager_injury_lite_test",
+            "season-manager.py",
+            {
+                "shared": shared,
+                "yahoo_fantasy_api": _module("yahoo_fantasy_api"),
+                "statsapi": None,
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda name, *args, **kwargs: "mlb-" + str(name)),
+                "yahoo_browser": types.SimpleNamespace(
+                    is_scope_error=lambda *_args, **_kwargs: False,
+                    write_method=lambda *_args, **_kwargs: None,
+                ),
+            },
+        )
+
+        class FakeTeam:
+            def roster(self):
+                return [
+                    {
+                        "player_id": "10",
+                        "name": "Injured Starter",
+                        "selected_position": "1B",
+                        "eligible_positions": ["1B", "Util"],
+                        "status": "DTD",
+                    },
+                    {
+                        "player_id": "11",
+                        "name": "Healthy IL",
+                        "selected_position": "IL",
+                        "eligible_positions": ["OF", "Util"],
+                        "status": "",
+                    },
+                ]
+
+        module.get_league_context = lambda: (None, None, None, FakeTeam())
+
+        payload = module.cmd_injury_report([], as_json=True, include_intel=False)
+
+        self.assertEqual(enrich_calls, [])
+        self.assertEqual(len(payload["injured_active"]), 1)
+        self.assertEqual(len(payload["healthy_il"]), 1)
+
+    def test_cmd_waiver_analyze_can_skip_intel_for_json_payload(self):
+        enrich_calls = []
+        trend_calls = []
+        shared = _shared_stub()
+        shared.enrich_with_intel = lambda players, *args, **kwargs: enrich_calls.append(len(players))
+        shared.enrich_with_trends = lambda players, *args, **kwargs: trend_calls.append(len(players))
+        shared.TEAM_ID = "my-team"
+
+        module = _load_script(
+            "season_manager_waiver_lite_test",
+            "season-manager.py",
+            {
+                "shared": shared,
+                "yahoo_fantasy_api": _module("yahoo_fantasy_api"),
+                "statsapi": None,
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda name, *args, **kwargs: "mlb-" + str(name)),
+                "yahoo_browser": types.SimpleNamespace(
+                    is_scope_error=lambda *_args, **_kwargs: False,
+                    write_method=lambda *_args, **_kwargs: None,
+                ),
+                "valuations": types.SimpleNamespace(
+                    get_player_zscore=lambda name: {"tier": "Solid", "z_final": 2.0, "per_category_zscores": {}},
+                    POS_BONUS={},
+                ),
+            },
+        )
+
+        class FakeTeam:
+            def roster(self):
+                return []
+
+        class FakeLeague:
+            def matchups(self):
+                return []
+
+            def free_agents(self, pos_type):
+                return [
+                    {
+                        "player_id": "101",
+                        "name": "Waiver One",
+                        "eligible_positions": ["1B"],
+                        "percent_owned": 25,
+                        "status": "",
+                    },
+                    {
+                        "player_id": "102",
+                        "name": "Waiver Two",
+                        "eligible_positions": ["3B"],
+                        "percent_owned": 15,
+                        "status": "",
+                    },
+                ]
+
+            def to_team(self, team_id):
+                return FakeTeam()
+
+        module.get_league = lambda: (None, None, FakeLeague())
+        module.get_db = lambda: types.SimpleNamespace(
+            execute=lambda *args, **kwargs: None,
+            commit=lambda: None,
+            close=lambda: None,
+        )
+
+        saved = sys.modules.get("valuations")
+        sys.modules["valuations"] = types.SimpleNamespace(
+            get_player_zscore=lambda name: {"tier": "Solid", "z_final": 2.0, "per_category_zscores": {}},
+            POS_BONUS={},
+        )
+        try:
+            payload = module.cmd_waiver_analyze(["B", "2"], as_json=True, include_intel=False)
+        finally:
+            if saved is None:
+                sys.modules.pop("valuations", None)
+            else:
+                sys.modules["valuations"] = saved
+
+        self.assertEqual(enrich_calls, [])
+        self.assertEqual(trend_calls, [])
+        self.assertEqual(payload["pos_type"], "B")
+        self.assertEqual(len(payload["recommendations"]), 2)
+
+    def test_cmd_whats_new_can_skip_injury_intel_for_json_payload(self):
+        module = _load_script(
+            "season_manager_whats_new_lite_test",
+            "season-manager.py",
+            {
+                "shared": _shared_stub(),
+                "yahoo_fantasy_api": _module("yahoo_fantasy_api"),
+                "statsapi": None,
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "yahoo_browser": types.SimpleNamespace(
+                    is_scope_error=lambda *_args, **_kwargs: False,
+                    write_method=lambda *_args, **_kwargs: None,
+                ),
+            },
+        )
+
+        class FakeDB:
+            def execute(self, *_args, **_kwargs):
+                return types.SimpleNamespace(fetchone=lambda: None)
+
+            def commit(self):
+                return None
+
+        injury_calls = []
+        module.get_db = lambda: FakeDB()
+        module.get_league_context = lambda: (
+            None,
+            None,
+            None,
+            types.SimpleNamespace(team_data={"name": "My Team"}),
+        )
+        module.get_trend_lookup = lambda: {}
+        module.importlib.import_module = lambda name: (
+            types.SimpleNamespace(cmd_transactions=lambda *_args, **_kwargs: {"transactions": []})
+            if name == "yahoo-fantasy"
+            else types.SimpleNamespace(cmd_prospect_watch=lambda *_args, **_kwargs: {"transactions": []})
+        )
+        module.cmd_injury_report = lambda args, as_json=False, include_intel=True: injury_calls.append(include_intel) or {
+            "injured_active": [{"name": "Injured Bat", "status": "IL", "position": "OF"}],
+            "healthy_il": [],
+        }
+        module.cmd_pending_trades = lambda *_args, **_kwargs: {"trades": []}
+
+        payload = module.cmd_whats_new([], as_json=True, include_intel=False)
+
+        self.assertEqual(injury_calls, [False])
+        self.assertEqual(
+            payload["injuries"],
+            [{"name": "Injured Bat", "status": "IL", "position": "OF", "section": "active_injured"}],
+        )
+
     def test_cmd_best_available_uses_lightweight_cached_lookup_path(self):
         shared = _shared_stub()
         enrich_calls = []

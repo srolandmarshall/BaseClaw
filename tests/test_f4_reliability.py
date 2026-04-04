@@ -1500,6 +1500,191 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(payload["game"]["my_active_count"], 1)
         self.assertEqual(payload["game"]["opp_active_count"], 1)
 
+    def test_workflow_morning_briefing_uses_lightweight_helpers(self):
+        api_module = _load_script(
+            "api_server_workflow_morning_briefing_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        calls = []
+        cached_payloads = []
+        api_module._dashboard_cache_get = lambda *_args, **_kwargs: None
+        api_module._dashboard_cache_set = lambda key, payload: cached_payloads.append((key, payload))
+        api_module._safe_injury_report = lambda include_intel=False: calls.append(("injury", include_intel)) or {"injured_active": []}
+        api_module._safe_lineup_preview = lambda include_intel=False: calls.append(("lineup", include_intel)) or {"active_off_day": []}
+        api_module._safe_whats_new = lambda include_intel=False: calls.append(("whats_new", include_intel)) or {"pending_trades": []}
+        api_module._safe_waiver_analyze = lambda pos_type, count, include_intel=False: calls.append(("waiver", pos_type, str(count), include_intel)) or {
+            "recommendations": [],
+            "weak_categories": [],
+        }
+        api_module._safe_call = lambda fn, args=None: fn(args or [], as_json=True)
+        api_module._synthesize_morning_actions = lambda *_args, **_kwargs: [{"priority": 1, "type": "noop"}]
+        api_module.yahoo_fantasy.get_league = lambda: (None, None, types.SimpleNamespace(edit_date=lambda: "2026-04-03"))
+        api_module.yahoo_fantasy.cmd_matchup_detail = lambda args=None, as_json=False: {"matchup": "ok"}
+        api_module.season_manager.cmd_matchup_strategy = lambda args=None, as_json=False: {"strategy": "ok"}
+
+        payload = api_module.workflow_morning_briefing()
+
+        self.assertEqual(payload["edit_date"], "2026-04-03")
+        self.assertEqual(payload["action_items"], [{"priority": 1, "type": "noop"}])
+        self.assertEqual(
+            calls,
+            [
+                ("injury", False),
+                ("lineup", False),
+                ("whats_new", False),
+                ("waiver", "B", "5", False),
+                ("waiver", "P", "5", False),
+            ],
+        )
+        self.assertEqual(len(cached_payloads), 1)
+        self.assertEqual(cached_payloads[0][0][0], "workflow-morning-briefing")
+        self.assertIs(cached_payloads[0][1], payload)
+
+    def test_workflow_morning_briefing_uses_cached_payload_when_available(self):
+        api_module = _load_script(
+            "api_server_workflow_morning_briefing_cache_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        expected = {"action_items": [{"priority": 1}], "cached": True}
+        api_module._dashboard_cache_get = lambda *_args, **_kwargs: expected
+        api_module._dashboard_cache_set = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not write cache"))
+        api_module._safe_injury_report = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not compute injury"))
+        api_module._safe_lineup_preview = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not compute lineup"))
+        api_module._safe_whats_new = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not compute digest"))
+        api_module._safe_waiver_analyze = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not compute waivers"))
+
+        payload = api_module.workflow_morning_briefing()
+
+        self.assertIs(payload, expected)
+
+    def test_workflow_waiver_recommendations_uses_lightweight_waiver_helpers(self):
+        api_module = _load_script(
+            "api_server_workflow_waiver_recommendations_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        calls = []
+        api_module.request.args = {"count": "7"}
+        api_module._dashboard_cache_get = lambda *_args, **_kwargs: None
+        api_module._dashboard_cache_set = lambda *_args, **_kwargs: None
+        api_module._safe_waiver_analyze = lambda pos_type, count, include_intel=False: calls.append((pos_type, str(count), include_intel)) or {
+            "recommendations": [],
+            "weak_categories": [],
+        }
+        api_module._safe_roster = lambda include_intel=False: calls.append(("roster", include_intel)) or {"players": []}
+        api_module._safe_call = lambda fn, args=None: fn(args or [], as_json=True)
+        api_module._synthesize_waiver_pairs = lambda waiver_b, waiver_p: [{"batters": waiver_b, "pitchers": waiver_p}]
+        api_module.season_manager.cmd_category_check = lambda args=None, as_json=False: {"categories": []}
+
+        payload = api_module.workflow_waiver_recommendations()
+
+        self.assertEqual(
+            calls,
+            [("B", "7", False), ("P", "7", False), ("roster", False)],
+        )
+        self.assertIn("pairs", payload)
+        self.assertEqual(payload["category_check"], {"categories": []})
+        self.assertEqual(payload["roster"], {"players": []})
+
+    def test_workflow_roster_health_uses_lightweight_roster_and_helpers(self):
+        api_module = _load_script(
+            "api_server_workflow_roster_health_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        calls = []
+        api_module._dashboard_cache_get = lambda *_args, **_kwargs: None
+        api_module._dashboard_cache_set = lambda *_args, **_kwargs: None
+        api_module._safe_injury_report = lambda include_intel=False: calls.append(("injury", include_intel)) or {"injured_active": []}
+        api_module._safe_lineup_preview = lambda include_intel=False: calls.append(("lineup", include_intel)) or {"active_off_day": []}
+        api_module._safe_roster = lambda include_intel=False: calls.append(("roster", include_intel)) or {"players": [{"name": "Bench Bat"}]}
+        api_module._safe_call = lambda fn, args=None: fn(args or [], as_json=True)
+        api_module._synthesize_roster_issues = lambda injury, lineup, roster, busts: [{"severity": "info", "count": len(roster.get("players", [])) + len(busts.get("candidates", []))}]
+        api_module.intel.cmd_busts = lambda args=None, as_json=False: {"candidates": [{"name": "Bench Bat"}]}
+
+        payload = api_module.workflow_roster_health()
+
+        self.assertEqual(
+            calls,
+            [("injury", False), ("lineup", False), ("roster", False)],
+        )
+        self.assertEqual(payload["issues"], [{"severity": "info", "count": 2}])
+        self.assertEqual(payload["roster"], {"players": [{"name": "Bench Bat"}]})
+
     def test_auth_status_reports_oauth_and_browser_readiness(self):
         shared_module = _shared_stub()
         shared_module.OAUTH_FILE = "/tmp/yahoo_oauth.json"
