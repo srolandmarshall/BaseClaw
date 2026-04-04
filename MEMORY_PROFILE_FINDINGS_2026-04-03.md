@@ -145,6 +145,12 @@ I also added API-level regression tests around these workflow routes so the
 lightweight helper usage and warm-cache short-circuit behavior are enforced in
 `tests/test_f4_reliability.py`, not just verified manually.
 
+During follow-up profiling I also found that workflow aggregates were still
+calling `yahoo-fantasy.cmd_roster(..., as_json=True)` through its default
+`include_intel=True` path. I added a `_safe_roster(include_intel=False)` helper
+and switched the workflow aggregate routes that only need roster structure, not
+per-player intel, to the lightweight roster path as well.
+
 ## Effect of the Lightweight Workflow Change
 
 The initial lightweight workflow change reduced the memory peak for
@@ -196,6 +202,22 @@ Observed after adding short-lived workflow caching locally:
 That does not reduce the first cold peak, but it should materially reduce
 repeat churn, repeated latency, and the chance of back-to-back heavy workflow
 requests stacking into an OOM event.
+
+Observed after switching `workflow_waiver_recommendations` to both lightweight
+waiver analysis and lightweight roster payloads:
+
+- `/api/workflow/waiver-recommendations?count=5`
+  - before roster-lite fix:
+    - about `31535.7 ms`
+    - about `+1375.8 MB` request RSS
+    - about `1493.0 MB` total RSS
+  - after roster-lite fix:
+    - about `24999.9 ms`
+    - about `+258.0 MB` request RSS
+    - about `375.8 MB` total RSS
+
+That is the clearest proof so far that "hidden default intel on shared helper
+calls" is a real cold-memory driver in the workflow layer.
 
 ### Likely deeper follow-up
 

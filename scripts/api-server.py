@@ -3216,6 +3216,14 @@ def _safe_waiver_analyze(pos_type, count, include_intel=False):
         return {"_error": str(e)}
 
 
+def _safe_roster(include_intel=False):
+    """Request a lightweight roster payload for workflow aggregates by default."""
+    try:
+        return yahoo_fantasy.cmd_roster([str(include_intel).lower()], as_json=True)
+    except Exception as e:
+        return {"_error": str(e)}
+
+
 def _synthesize_morning_actions(injury, lineup, whats_new, waiver_b, waiver_p):
     """Build priority-ranked action items from morning briefing data"""
     actions = []
@@ -3415,7 +3423,7 @@ def workflow_roster_health():
     try:
         injury = _safe_injury_report(include_intel=False)
         lineup = _safe_lineup_preview(include_intel=False)
-        roster = _safe_call(yahoo_fantasy.cmd_roster)
+        roster = _safe_roster(include_intel=False)
         busts = _safe_call(intel.cmd_busts, ["B", "20"])
 
         issues = _synthesize_roster_issues(injury, lineup, roster, busts)
@@ -3469,7 +3477,7 @@ def workflow_waiver_recommendations():
         cat_check = _safe_call(season_manager.cmd_category_check)
         waiver_b = _safe_waiver_analyze("B", count, include_intel=False)
         waiver_p = _safe_waiver_analyze("P", count, include_intel=False)
-        roster = _safe_call(yahoo_fantasy.cmd_roster)
+        roster = _safe_roster(include_intel=False)
 
         pairs = _synthesize_waiver_pairs(waiver_b, waiver_p)
 
