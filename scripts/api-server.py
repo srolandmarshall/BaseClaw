@@ -3192,6 +3192,30 @@ def _safe_call(fn, args=None):
         return {"_error": str(e)}
 
 
+def _safe_lineup_preview(include_intel=False):
+    """Request a lightweight lineup preview for workflow aggregates by default."""
+    try:
+        return season_manager.cmd_lineup_optimize([], as_json=True, include_intel=include_intel)
+    except Exception as e:
+        return {"_error": str(e)}
+
+
+def _safe_injury_report(include_intel=False):
+    """Request a lightweight injury payload for workflow aggregates by default."""
+    try:
+        return season_manager.cmd_injury_report([], as_json=True, include_intel=include_intel)
+    except Exception as e:
+        return {"_error": str(e)}
+
+
+def _safe_waiver_analyze(pos_type, count, include_intel=False):
+    """Request waiver recommendations without heavy intel/trend enrichment when possible."""
+    try:
+        return season_manager.cmd_waiver_analyze([pos_type, str(count)], as_json=True, include_intel=include_intel)
+    except Exception as e:
+        return {"_error": str(e)}
+
+
 def _synthesize_morning_actions(injury, lineup, whats_new, waiver_b, waiver_p):
     """Build priority-ranked action items from morning briefing data"""
     actions = []
@@ -3260,13 +3284,13 @@ def _synthesize_morning_actions(injury, lineup, whats_new, waiver_b, waiver_p):
 @app.route("/api/workflow/morning-briefing")
 def workflow_morning_briefing():
     try:
-        injury = _safe_call(season_manager.cmd_injury_report)
-        lineup = _safe_call(season_manager.cmd_lineup_optimize)
+        injury = _safe_injury_report(include_intel=False)
+        lineup = _safe_lineup_preview(include_intel=False)
         matchup = _safe_call(yahoo_fantasy.cmd_matchup_detail)
         strategy = _safe_call(season_manager.cmd_matchup_strategy)
         whats_new = _safe_call(season_manager.cmd_whats_new)
-        waiver_b = _safe_call(season_manager.cmd_waiver_analyze, ["B", "5"])
-        waiver_p = _safe_call(season_manager.cmd_waiver_analyze, ["P", "5"])
+        waiver_b = _safe_waiver_analyze("B", 5, include_intel=False)
+        waiver_p = _safe_waiver_analyze("P", 5, include_intel=False)
 
         action_items = _synthesize_morning_actions(
             injury, lineup, whats_new, waiver_b, waiver_p
@@ -3373,8 +3397,8 @@ def _synthesize_roster_issues(injury, lineup, roster, busts):
 @app.route("/api/workflow/roster-health")
 def workflow_roster_health():
     try:
-        injury = _safe_call(season_manager.cmd_injury_report)
-        lineup = _safe_call(season_manager.cmd_lineup_optimize)
+        injury = _safe_injury_report(include_intel=False)
+        lineup = _safe_lineup_preview(include_intel=False)
         roster = _safe_call(yahoo_fantasy.cmd_roster)
         busts = _safe_call(intel.cmd_busts, ["B", "20"])
 

@@ -773,7 +773,7 @@ def cmd_category_check(args, as_json=False):
         print("Weakest:   " + ", ".join(weak))
 
 
-def cmd_injury_report(args, as_json=False):
+def cmd_injury_report(args, as_json=False, include_intel=True):
     """Check roster for injured/IL-eligible players"""
     if not as_json:
         print("Injury Report")
@@ -847,7 +847,8 @@ def cmd_injury_report(args, as_json=False):
         injured_bench_info = [injury_info(p) for p in injured_bench]
         il_proper_info = [injury_info(p) for p in il_proper]
         all_players = injured_active_info + healthy_il_info + injured_bench_info + il_proper_info
-        enrich_with_intel(all_players)
+        if include_intel:
+            enrich_with_intel(all_players)
         return {
             "injured_active": injured_active_info,
             "healthy_il": healthy_il_info,
@@ -907,7 +908,7 @@ def cmd_injury_report(args, as_json=False):
         print("Roster looks healthy and correctly configured!")
 
 
-def cmd_waiver_analyze(args, as_json=False):
+def cmd_waiver_analyze(args, as_json=False, include_intel=True):
     """Score free agents using z-score projections and category need"""
     pos_type = args[0] if args else "B"
     count = int(args[1]) if len(args) > 1 else 15
@@ -1131,8 +1132,9 @@ def cmd_waiver_analyze(args, as_json=False):
         pass
 
     if as_json:
-        enrich_with_intel(scored, count, boost_scores=True)
-        enrich_with_trends(scored, count)
+        if include_intel:
+            enrich_with_intel(scored, count, boost_scores=True)
+            enrich_with_trends(scored, count)
         scored.sort(key=lambda x: -x.get("score", 0))
         weak_list = []
         for cat, rank, total in weak_cats:
