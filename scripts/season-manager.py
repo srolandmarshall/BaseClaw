@@ -3005,7 +3005,7 @@ def cmd_reject_trade(args, as_json=False):
         print(msg)
 
 
-def cmd_whats_new(args, as_json=False):
+def cmd_whats_new(args, as_json=False, include_intel=True):
     """Single digest: injuries, pending trades, opponent moves, trending pickups, prospect call-ups"""
     sc, gm, lg, team = get_league_context()
 
@@ -3031,7 +3031,7 @@ def cmd_whats_new(args, as_json=False):
 
     # 1. Injury updates
     try:
-        injury_data = cmd_injury_report([], as_json=True)
+        injury_data = cmd_injury_report([], as_json=True, include_intel=include_intel)
         injured = []
         for p in injury_data.get("injured_active", []):
             injured.append({

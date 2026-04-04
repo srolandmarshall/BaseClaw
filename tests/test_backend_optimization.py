@@ -443,6 +443,57 @@ class BackendOptimizationTests(unittest.TestCase):
         self.assertEqual(payload["pos_type"], "B")
         self.assertEqual(len(payload["recommendations"]), 2)
 
+    def test_cmd_whats_new_can_skip_injury_intel_for_json_payload(self):
+        module = _load_script(
+            "season_manager_whats_new_lite_test",
+            "season-manager.py",
+            {
+                "shared": _shared_stub(),
+                "yahoo_fantasy_api": _module("yahoo_fantasy_api"),
+                "statsapi": None,
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "yahoo_browser": types.SimpleNamespace(
+                    is_scope_error=lambda *_args, **_kwargs: False,
+                    write_method=lambda *_args, **_kwargs: None,
+                ),
+            },
+        )
+
+        class FakeDB:
+            def execute(self, *_args, **_kwargs):
+                return types.SimpleNamespace(fetchone=lambda: None)
+
+            def commit(self):
+                return None
+
+        injury_calls = []
+        module.get_db = lambda: FakeDB()
+        module.get_league_context = lambda: (
+            None,
+            None,
+            None,
+            types.SimpleNamespace(team_data={"name": "My Team"}),
+        )
+        module.get_trend_lookup = lambda: {}
+        module.importlib.import_module = lambda name: (
+            types.SimpleNamespace(cmd_transactions=lambda *_args, **_kwargs: {"transactions": []})
+            if name == "yahoo-fantasy"
+            else types.SimpleNamespace(cmd_prospect_watch=lambda *_args, **_kwargs: {"transactions": []})
+        )
+        module.cmd_injury_report = lambda args, as_json=False, include_intel=True: injury_calls.append(include_intel) or {
+            "injured_active": [{"name": "Injured Bat", "status": "IL", "position": "OF"}],
+            "healthy_il": [],
+        }
+        module.cmd_pending_trades = lambda *_args, **_kwargs: {"trades": []}
+
+        payload = module.cmd_whats_new([], as_json=True, include_intel=False)
+
+        self.assertEqual(injury_calls, [False])
+        self.assertEqual(
+            payload["injuries"],
+            [{"name": "Injured Bat", "status": "IL", "position": "OF", "section": "active_injured"}],
+        )
+
     def test_cmd_best_available_uses_lightweight_cached_lookup_path(self):
         shared = _shared_stub()
         enrich_calls = []

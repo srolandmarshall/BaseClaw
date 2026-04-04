@@ -1530,6 +1530,7 @@ class ReliabilityHardeningTests(unittest.TestCase):
         api_module._dashboard_cache_set = lambda key, payload: cached_payloads.append((key, payload))
         api_module._safe_injury_report = lambda include_intel=False: calls.append(("injury", include_intel)) or {"injured_active": []}
         api_module._safe_lineup_preview = lambda include_intel=False: calls.append(("lineup", include_intel)) or {"active_off_day": []}
+        api_module._safe_whats_new = lambda include_intel=False: calls.append(("whats_new", include_intel)) or {"pending_trades": []}
         api_module._safe_waiver_analyze = lambda pos_type, count, include_intel=False: calls.append(("waiver", pos_type, str(count), include_intel)) or {
             "recommendations": [],
             "weak_categories": [],
@@ -1539,7 +1540,6 @@ class ReliabilityHardeningTests(unittest.TestCase):
         api_module.yahoo_fantasy.get_league = lambda: (None, None, types.SimpleNamespace(edit_date=lambda: "2026-04-03"))
         api_module.yahoo_fantasy.cmd_matchup_detail = lambda args=None, as_json=False: {"matchup": "ok"}
         api_module.season_manager.cmd_matchup_strategy = lambda args=None, as_json=False: {"strategy": "ok"}
-        api_module.season_manager.cmd_whats_new = lambda args=None, as_json=False: {"news": []}
 
         payload = api_module.workflow_morning_briefing()
 
@@ -1550,6 +1550,7 @@ class ReliabilityHardeningTests(unittest.TestCase):
             [
                 ("injury", False),
                 ("lineup", False),
+                ("whats_new", False),
                 ("waiver", "B", "5", False),
                 ("waiver", "P", "5", False),
             ],
@@ -1587,6 +1588,7 @@ class ReliabilityHardeningTests(unittest.TestCase):
         api_module._dashboard_cache_set = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not write cache"))
         api_module._safe_injury_report = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not compute injury"))
         api_module._safe_lineup_preview = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not compute lineup"))
+        api_module._safe_whats_new = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not compute digest"))
         api_module._safe_waiver_analyze = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not compute waivers"))
 
         payload = api_module.workflow_morning_briefing()

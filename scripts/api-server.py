@@ -3224,6 +3224,14 @@ def _safe_roster(include_intel=False):
         return {"_error": str(e)}
 
 
+def _safe_whats_new(include_intel=False):
+    """Request a lightweight digest payload for workflow aggregates by default."""
+    try:
+        return season_manager.cmd_whats_new([], as_json=True, include_intel=include_intel)
+    except Exception as e:
+        return {"_error": str(e)}
+
+
 def _synthesize_morning_actions(injury, lineup, whats_new, waiver_b, waiver_p):
     """Build priority-ranked action items from morning briefing data"""
     actions = []
@@ -3300,7 +3308,7 @@ def workflow_morning_briefing():
         lineup = _safe_lineup_preview(include_intel=False)
         matchup = _safe_call(yahoo_fantasy.cmd_matchup_detail)
         strategy = _safe_call(season_manager.cmd_matchup_strategy)
-        whats_new = _safe_call(season_manager.cmd_whats_new)
+        whats_new = _safe_whats_new(include_intel=False)
         waiver_b = _safe_waiver_analyze("B", 5, include_intel=False)
         waiver_p = _safe_waiver_analyze("P", 5, include_intel=False)
 

@@ -151,6 +151,12 @@ calling `yahoo-fantasy.cmd_roster(..., as_json=True)` through its default
 and switched the workflow aggregate routes that only need roster structure, not
 per-player intel, to the lightweight roster path as well.
 
+I also found a nested heavy path in `cmd_whats_new(..., as_json=True)`: it was
+calling `cmd_injury_report(..., include_intel=True)` internally even when the
+parent workflow had already requested a lightweight injury payload. I added
+`include_intel` support there too and routed `workflow_morning_briefing()` to a
+lightweight digest helper.
+
 ## Effect of the Lightweight Workflow Change
 
 The initial lightweight workflow change reduced the memory peak for
@@ -218,6 +224,34 @@ waiver analysis and lightweight roster payloads:
 
 That is the clearest proof so far that "hidden default intel on shared helper
 calls" is a real cold-memory driver in the workflow layer.
+
+Observed after the same lightweight-roster change on `workflow_roster_health`:
+
+- `/api/workflow/roster-health`
+  - earlier cold reading:
+    - about `18.4s`
+    - about `+448.2 MB` request RSS
+  - after lightweight roster path:
+    - about `15101.6 ms`
+    - about `+222.7 MB` request RSS
+    - about `340.6 MB` total RSS
+
+Observed after switching `workflow_morning_briefing` to a lightweight
+`whats_new` digest that no longer re-runs heavy injury intel:
+
+- `/api/workflow/morning-briefing`
+  - after lineup/injury/waiver-lite but before digest-lite:
+    - about `46914.0 ms`
+    - about `+417.8 MB` request RSS
+    - about `535.5 MB` total RSS
+  - after digest-lite fix:
+    - about `37200.4 ms`
+    - about `+261.6 MB` request RSS
+    - about `381.0 MB` total RSS
+
+That confirms the remaining cold-memory issue is often not the top-level route
+itself, but nested helper calls that silently re-enter the expensive intel
+paths with their default arguments.
 
 ### Likely deeper follow-up
 
