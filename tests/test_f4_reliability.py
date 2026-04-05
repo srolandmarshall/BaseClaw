@@ -1,6 +1,9 @@
 import importlib.util
+import json
 import pathlib
 import sys
+import threading
+import time
 import types
 import unittest
 from datetime import date, datetime
@@ -489,6 +492,8 @@ class ReliabilityHardeningTests(unittest.TestCase):
         trace_utils_mod.log_trace_event = lambda **_kwargs: None
         trace_utils_mod.monotonic_ms = lambda: 1
         trace_utils_mod.trace_config = lambda: {}
+        s3_cache_mod = _module("s3_cache")
+        s3_cache_mod.s3_cache = types.SimpleNamespace(get=lambda *_args, **_kwargs: None, put=lambda *_args, **_kwargs: False)
 
         intel_mod = _load_script(
             "intel_script_for_test",
@@ -497,6 +502,7 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "shared": _shared_stub(),
                 "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
                 "trace_utils": trace_utils_mod,
+                "s3_cache": s3_cache_mod,
             },
         )
 
@@ -530,6 +536,136 @@ class ReliabilityHardeningTests(unittest.TestCase):
             self.assertIn("fallback arm", rows)
             self.assertEqual(rows["fallback arm"]["data_season"], intel_mod.YEAR - 1)
             self.assertEqual(mock_print.call_count, 0)
+        finally:
+            if saved_pybaseball is None:
+                sys.modules.pop("pybaseball", None)
+            else:
+                sys.modules["pybaseball"] = saved_pybaseball
+
+    def test_fangraphs_regression_pitching_uses_s3_json_cache_before_pybaseball(self):
+        trace_events = []
+        trace_utils_mod = _module("trace_utils")
+        trace_utils_mod.log_trace_event = lambda **kwargs: trace_events.append(kwargs)
+        trace_utils_mod.monotonic_ms = lambda: 1
+        trace_utils_mod.trace_config = lambda: {}
+
+        payload = {
+            "cached arm": {
+                "era": 3.2,
+                "fip": 3.4,
+                "xfip": 3.5,
+                "babip": 0.281,
+                "lob_pct": 74.0,
+                "siera": 3.44,
+                "ip": 111.0,
+                "data_season": 2025,
+            }
+        }
+        s3_cache_mod = _module("s3_cache")
+        s3_cache_mod.s3_cache = types.SimpleNamespace(
+            get=lambda *_args, **_kwargs: json.dumps(payload).encode("utf-8"),
+            put=lambda *_args, **_kwargs: False,
+        )
+
+        intel_mod = _load_script(
+            "intel_script_s3_cache_for_test",
+            "intel.py",
+            {
+                "shared": _shared_stub(),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "trace_utils": trace_utils_mod,
+                "s3_cache": s3_cache_mod,
+            },
+        )
+
+        pybaseball_mod = _module("pybaseball")
+        pybaseball_mod.pitching_stats = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not call pybaseball"))
+        saved_pybaseball = sys.modules.get("pybaseball")
+        sys.modules["pybaseball"] = pybaseball_mod
+        try:
+            intel_mod._cache.clear()
+            rows = intel_mod._fetch_fangraphs_regression_pitching()
+            self.assertEqual(rows, payload)
+            self.assertEqual(trace_events[-1]["cache_layer"], "s3")
+            self.assertTrue(trace_events[-1]["cache_hit"])
+        finally:
+            if saved_pybaseball is None:
+                sys.modules.pop("pybaseball", None)
+            else:
+                sys.modules["pybaseball"] = saved_pybaseball
+
+    def test_fangraphs_regression_pitching_dedupes_parallel_cold_misses(self):
+        trace_utils_mod = _module("trace_utils")
+        trace_utils_mod.log_trace_event = lambda **_kwargs: None
+        trace_utils_mod.monotonic_ms = lambda: 1
+        trace_utils_mod.trace_config = lambda: {}
+        s3_cache_mod = _module("s3_cache")
+        s3_cache_mod.s3_cache = types.SimpleNamespace(get=lambda *_args, **_kwargs: None, put=lambda *_args, **_kwargs: True)
+
+        intel_mod = _load_script(
+            "intel_script_singleflight_for_test",
+            "intel.py",
+            {
+                "shared": _shared_stub(),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "trace_utils": trace_utils_mod,
+                "s3_cache": s3_cache_mod,
+            },
+        )
+
+        call_count = {"count": 0}
+        load_started = threading.Event()
+
+        pybaseball_mod = _module("pybaseball")
+
+        def fake_pitching_stats(_year, qual=25):
+            self.assertEqual(qual, 25)
+            call_count["count"] += 1
+            load_started.set()
+            time.sleep(0.05)
+            return _FakeDataFrame(
+                [
+                    {
+                        "Name": "Single Flight",
+                        "ERA": 3.1,
+                        "FIP": 3.3,
+                        "xFIP": 3.4,
+                        "BABIP": 0.281,
+                        "LOB%": 75.0,
+                        "SIERA": 3.45,
+                        "IP": 160.0,
+                    }
+                ]
+            )
+
+        pybaseball_mod.pitching_stats = fake_pitching_stats
+        saved_pybaseball = sys.modules.get("pybaseball")
+        sys.modules["pybaseball"] = pybaseball_mod
+        try:
+            intel_mod._cache.clear()
+            results = []
+            errors = []
+
+            def worker():
+                try:
+                    results.append(intel_mod._fetch_fangraphs_regression_pitching())
+                except Exception as exc:  # pragma: no cover - diagnostic path
+                    errors.append(exc)
+
+            first = threading.Thread(target=worker)
+            second = threading.Thread(target=worker)
+            first.start()
+            self.assertTrue(load_started.wait(timeout=1.0))
+            second.start()
+            threads = [first, second]
+            for thread in threads:
+                thread.join()
+
+            self.assertEqual(errors, [])
+            self.assertEqual(call_count["count"], 1)
+            self.assertEqual(len(results), 2)
+            self.assertEqual(results[0], results[1])
+            self.assertIn("single flight", results[0])
         finally:
             if saved_pybaseball is None:
                 sys.modules.pop("pybaseball", None)
