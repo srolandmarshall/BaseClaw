@@ -88,23 +88,58 @@ _cache_manager = CacheManager()
 # ============================================================
 
 _cache = {}
+_cache_lock = threading.Lock()
+_cache_fill_locks = {}
+_cache_fill_locks_guard = threading.Lock()
 
 
 def _cache_get(key, ttl_seconds):
     """Get cached value if not expired"""
-    entry = _cache.get(key)
-    if entry is None:
-        return None
-    data, fetch_time = entry
-    if time.time() - fetch_time > ttl_seconds:
-        del _cache[key]
-        return None
-    return data
+    with _cache_lock:
+        entry = _cache.get(key)
+        if entry is None:
+            return None
+        data, fetch_time = entry
+        if time.time() - fetch_time > ttl_seconds:
+            del _cache[key]
+            return None
+        return data
 
 
 def _cache_set(key, data):
     """Store value in cache with current timestamp"""
-    _cache[key] = (data, time.time())
+    with _cache_lock:
+        _cache[key] = (data, time.time())
+
+
+def _cache_fill_lock(key):
+    with _cache_fill_locks_guard:
+        lock = _cache_fill_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _cache_fill_locks[key] = lock
+        return lock
+
+
+def _s3_json_cache_get(key):
+    cached_bytes = _s3_cache.get(key)
+    if not cached_bytes:
+        return None
+    try:
+        payload = json.loads(cached_bytes.decode("utf-8"))
+    except Exception:
+        return None
+    if isinstance(payload, dict):
+        return payload
+    return None
+
+
+def _s3_json_cache_set(key, payload, ttl_seconds):
+    try:
+        raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    except Exception:
+        return False
+    return _s3_cache.put(key, raw, ttl_seconds=ttl_seconds)
 
 
 # ============================================================
@@ -948,6 +983,7 @@ def _fetch_fangraphs_regression_pitching():
     """
     started = monotonic_ms()
     cache_key = ("fangraphs_regression_pitching", YEAR)
+    s3_key = "intel/fangraphs_regression_pitching/" + str(YEAR) + ".json"
     cached = _cache_get(cache_key, TTL_FANGRAPHS)
     if cached is not None:
         log_trace_event(
@@ -958,48 +994,88 @@ def _fetch_fangraphs_regression_pitching():
             status="ok",
             gate="rankings",
             data_season=YEAR,
+            cache_layer="memory",
         )
         return cached
-    try:
-        from pybaseball import pitching_stats
-        result, year = _fetch_regression_dataset(
-            pitching_stats,
-            {
-                "era": "ERA",
-                "fip": "FIP",
-                "xfip": "xFIP",
-                "babip": "BABIP",
-                "lob_pct": "LOB%",
-                "siera": "SIERA",
-                "ip": "IP",
-            },
-        )
-        _cache_set(cache_key, result)
-        log_trace_event(
-            event="intel_cache",
-            stage="intel.fangraphs_regression_pitching",
-            duration_ms=max(monotonic_ms() - started, 0),
-            cache_hit=False,
-            status="ok",
-            gate="rankings",
-            data_season=year,
-            rows=len(result),
-        )
-        return result
-    except Exception as e:
-        print("Warning: FanGraphs regression pitching fetch failed: " + str(e))
-        _cache_set(cache_key, {})
-        log_trace_event(
-            event="intel_cache",
-            stage="intel.fangraphs_regression_pitching",
-            duration_ms=max(monotonic_ms() - started, 0),
-            cache_hit=False,
-            status="error",
-            gate="rankings",
-            data_season=YEAR,
-            error=str(e),
-        )
-        return {}
+    with _cache_fill_lock(cache_key):
+        cached = _cache_get(cache_key, TTL_FANGRAPHS)
+        if cached is not None:
+            log_trace_event(
+                event="intel_cache",
+                stage="intel.fangraphs_regression_pitching",
+                duration_ms=max(monotonic_ms() - started, 0),
+                cache_hit=True,
+                status="ok",
+                gate="rankings",
+                data_season=YEAR,
+                cache_layer="memory",
+            )
+            return cached
+
+        persisted = _s3_json_cache_get(s3_key)
+        if persisted is not None:
+            _cache_set(cache_key, persisted)
+            persisted_year = YEAR
+            for row in persisted.values():
+                if isinstance(row, dict) and row.get("data_season") is not None:
+                    persisted_year = row.get("data_season")
+                    break
+            log_trace_event(
+                event="intel_cache",
+                stage="intel.fangraphs_regression_pitching",
+                duration_ms=max(monotonic_ms() - started, 0),
+                cache_hit=True,
+                status="ok",
+                gate="rankings",
+                data_season=persisted_year,
+                rows=len(persisted),
+                cache_layer="s3",
+            )
+            return persisted
+
+        try:
+            from pybaseball import pitching_stats
+            result, year = _fetch_regression_dataset(
+                pitching_stats,
+                {
+                    "era": "ERA",
+                    "fip": "FIP",
+                    "xfip": "xFIP",
+                    "babip": "BABIP",
+                    "lob_pct": "LOB%",
+                    "siera": "SIERA",
+                    "ip": "IP",
+                },
+            )
+            _cache_set(cache_key, result)
+            _s3_json_cache_set(s3_key, result, TTL_FANGRAPHS)
+            log_trace_event(
+                event="intel_cache",
+                stage="intel.fangraphs_regression_pitching",
+                duration_ms=max(monotonic_ms() - started, 0),
+                cache_hit=False,
+                status="ok",
+                gate="rankings",
+                data_season=year,
+                rows=len(result),
+                cache_layer="source",
+            )
+            return result
+        except Exception as e:
+            print("Warning: FanGraphs regression pitching fetch failed: " + str(e))
+            _cache_set(cache_key, {})
+            log_trace_event(
+                event="intel_cache",
+                stage="intel.fangraphs_regression_pitching",
+                duration_ms=max(monotonic_ms() - started, 0),
+                cache_hit=False,
+                status="error",
+                gate="rankings",
+                data_season=YEAR,
+                error=str(e),
+                cache_layer="source",
+            )
+            return {}
 
 
 def detect_regression_candidates():
