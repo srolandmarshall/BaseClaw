@@ -2432,6 +2432,93 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(payload["players"][0]["name"], "Fast FA")
         self.assertEqual(payload["players"][0]["z_score"], 2.75)
 
+    def test_rankings_endpoint_bypasses_cached_empty_payload_after_recovery(self):
+        valuations_module = _module("valuations")
+        call_count = {"count": 0}
+
+        def fake_cmd_rankings(_args, as_json=False, enrich=True):
+            call_count["count"] += 1
+            if call_count["count"] == 1:
+                return {"players": [], "pos_type": "B", "source": "json"}
+            return {
+                "players": [
+                    {"rank": 1, "name": "Recovered Bat", "team": "ATL", "pos": "OF", "z_score": 4.2}
+                ],
+                "pos_type": "B",
+                "source": "csv",
+            }
+
+        valuations_module.cmd_rankings = fake_cmd_rankings
+        valuations_module.ensure_projections = lambda *_args, **_kwargs: {}
+
+        api_module = _load_script(
+            "api_server_rankings_cache_recovery_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": valuations_module,
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        api_module.request.args = {"pos_type": "B", "count": "3"}
+        first_payload = api_module.api_rankings()
+        second_payload = api_module.api_rankings()
+
+        self.assertEqual(first_payload["players"], [])
+        self.assertEqual(second_payload["players"][0]["name"], "Recovered Bat")
+        self.assertEqual(call_count["count"], 2)
+
+    def test_rankings_cache_skips_empty_grouped_all_payloads(self):
+        api_module = _load_script(
+            "api_server_rankings_empty_grouped_cache_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        empty_grouped = {
+            "groups": {
+                "B": {"players": [], "buckets": {"C": [], "1B": []}, "pos_type": "B", "source": "json"},
+                "P": {"players": [], "pos_type": "P", "source": "json"},
+            },
+            "pos_type": "ALL",
+        }
+
+        api_module._set_cached_rankings("ALL", 3, True, ["C", "1B"], empty_grouped, True)
+        cached = api_module._get_cached_rankings("ALL", 3, True, ["C", "1B"], True)
+
+        self.assertIsNone(cached)
+
     def test_free_agents_combines_waivers_and_true_free_agents(self):
         mlb_cache_mod = _module("mlb_id_cache")
         mlb_cache_mod.get_mlb_id = lambda name, *args, **kwargs: {

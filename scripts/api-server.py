@@ -1539,13 +1539,44 @@ def _get_cached_rankings(pos_type, count, group_by_position, positions, enrich=T
         entry = _rankings_cache.get(key)
         if entry and time.monotonic() < entry[0]:
             cached_count, cached_result = entry[1], entry[2]
+            if not _rankings_result_has_players(cached_result):
+                return None
             if cached_count >= int(count):
                 return _slice_rankings_result(cached_result, count)
         return None
 
 
+def _rankings_result_has_players(result):
+    if not isinstance(result, dict):
+        return False
+
+    players = result.get("players")
+    if isinstance(players, list) and len(players) > 0:
+        return True
+
+    groups = result.get("groups")
+    if not isinstance(groups, dict):
+        return False
+
+    for group in groups.values():
+        if _rankings_result_has_players(group):
+            return True
+        if not isinstance(group, dict):
+            continue
+        buckets = group.get("buckets")
+        if not isinstance(buckets, dict):
+            continue
+        for bucket_players in buckets.values():
+            if isinstance(bucket_players, list) and len(bucket_players) > 0:
+                return True
+
+    return False
+
+
 def _set_cached_rankings(pos_type, count, group_by_position, positions, result, enrich=True):
     import time
+    if not _rankings_result_has_players(result):
+        return
     key = _rankings_base_key(pos_type, group_by_position, positions, enrich)
     with _rankings_cache_lock:
         existing = _rankings_cache.get(key)
