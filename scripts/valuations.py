@@ -6,6 +6,8 @@ import json
 import os
 import csv
 import io
+import time
+import threading
 import urllib.request
 from datetime import date
 
@@ -371,8 +373,19 @@ PARK_FACTORS = {
 # Minimum thresholds (filter out tiny samples)
 MIN_PA = 200
 MIN_IP = 30
+_LIVE_STATS_CACHE_TTL = int(os.environ.get("LIVE_STATS_CACHE_TTL_SECONDS", "900"))
+_LIVE_STATS_NEGATIVE_TTL = int(os.environ.get("LIVE_STATS_NEGATIVE_TTL_SECONDS", "180"))
+_LIVE_STATS_FETCH_TIMEOUT = float(
+    os.environ.get("LIVE_STATS_FETCH_TIMEOUT_SECONDS", "5")
+)
 
 _cached_categories = None
+_LIVE_STATS_NEGATIVE_CACHE = object()
+_live_stats_lock = threading.Lock()
+_live_stats_cache = {
+    "bat": {"data": None, "time": 0.0, "status": "empty"},
+    "pit": {"data": None, "time": 0.0, "status": "empty"},
+}
 
 def load_league_categories(lg=None):
     """Load scoring categories from Yahoo API, falling back to defaults"""
@@ -1104,27 +1117,216 @@ def project_category_impact(add_players, drop_players, league_standings=None):
 
 # --- Live stats blending ---
 
-def load_live_stats():
-    """Load current-season live stats via pybaseball.
-    Returns (hitters_df, pitchers_df) or (None, None) if unavailable.
-    """
+def _normalize_live_stats_frame(df):
+    if df is not None and len(df) > 0:
+        df.columns = df.columns.str.strip()
+        return df
+    return None
+
+
+def _cached_live_stats(stats_type):
+    now = time.time()
+    with _live_stats_lock:
+        entry = _live_stats_cache.get(stats_type, {})
+        cached = entry.get("data")
+        age = now - float(entry.get("time", 0.0) or 0.0)
+        status = entry.get("status", "empty")
+        if cached is not None and age < _LIVE_STATS_CACHE_TTL:
+            return cached
+        if status == "error" and age < _LIVE_STATS_NEGATIVE_TTL:
+            return _LIVE_STATS_NEGATIVE_CACHE
+        return None
+
+
+def _store_live_stats_cache(stats_type, df, status):
+    with _live_stats_lock:
+        _live_stats_cache[stats_type] = {
+            "data": df,
+            "time": time.time(),
+            "status": status,
+        }
+
+
+def _load_live_stats_frame(stats_type):
+    cached = _cached_live_stats(stats_type)
+    if cached is _LIVE_STATS_NEGATIVE_CACHE:
+        return None
+    if cached is not None:
+        return cached
+
+    current_year = date.today().year
     try:
         from pybaseball import batting_stats, pitching_stats
-        current_year = date.today().year
-        h_df = batting_stats(current_year, qual=1)
-        p_df = pitching_stats(current_year, qual=1)
-        if h_df is not None and len(h_df) > 0:
-            h_df.columns = h_df.columns.str.strip()
+
+        fetcher = batting_stats if stats_type == "bat" else pitching_stats
+        result = {}
+        error = {}
+        done = threading.Event()
+
+        def _run_fetch():
+            try:
+                result["df"] = fetcher(current_year, qual=1)
+            except Exception as exc:
+                error["exc"] = exc
+            finally:
+                done.set()
+
+        # Daemon thread lets the request path return promptly even if an upstream
+        # library call ignores timeouts or blocks deep in I/O.
+        thread = threading.Thread(target=_run_fetch, daemon=True)
+        thread.start()
+
+        if not done.wait(timeout=_LIVE_STATS_FETCH_TIMEOUT):
+            print(
+                "Warning: live stats fetch timed out for "
+                + stats_type
+                + " after "
+                + str(_LIVE_STATS_FETCH_TIMEOUT)
+                + "s"
+            )
+            _store_live_stats_cache(stats_type, None, "error")
+            return None
+
+        if "exc" in error:
+            raise error["exc"]
+
+        df = result.get("df")
+        normalized = _normalize_live_stats_frame(df)
+        if normalized is not None:
+            _store_live_stats_cache(stats_type, normalized, "ok")
         else:
-            h_df = None
-        if p_df is not None and len(p_df) > 0:
-            p_df.columns = p_df.columns.str.strip()
-        else:
-            p_df = None
-        return h_df, p_df
+            _store_live_stats_cache(stats_type, None, "error")
+        return normalized
     except Exception as e:
-        print("Warning: live stats fetch failed: " + str(e))
-        return None, None
+        print("Warning: live stats fetch failed for " + stats_type + ": " + str(e))
+        _store_live_stats_cache(stats_type, None, "error")
+        return None
+
+
+def load_live_stats(stats_type="both"):
+    """Load current-season live stats via pybaseball with bounded latency.
+    Returns (hitters_df, pitchers_df) or a single populated side depending on stats_type.
+    """
+    requested = str(stats_type or "both").strip().lower()
+    if requested == "bat":
+        return _load_live_stats_frame("bat"), None
+    if requested == "pit":
+        return None, _load_live_stats_frame("pit")
+    return _load_live_stats_frame("bat"), _load_live_stats_frame("pit")
+
+
+def _live_weight_for_date(today=None):
+    """Return the current-season weight for live stats in live rankings."""
+    today = today or date.today()
+    month = int(today.month)
+    if month <= 4:
+        return 0.45
+    if month == 5:
+        return 0.55
+    if month == 6:
+        return 0.65
+    if month == 7:
+        return 0.72
+    return 0.8
+
+
+def _build_live_rankings_from_lookups(proj_lookup, live_lookup, pos_type, count, live_weight):
+    """Blend projection and season-to-date z-scores into a live ranking board."""
+    projection_weight = max(0.0, 1.0 - float(live_weight))
+    merged = []
+    all_names = set(proj_lookup.keys()) | set(live_lookup.keys())
+
+    for name_lower in all_names:
+        proj = proj_lookup.get(name_lower)
+        live = live_lookup.get(name_lower)
+        base = live or proj or {}
+        proj_z = _safe_float((proj or {}).get("z_score", 0))
+        live_z = _safe_float((live or {}).get("z_score", 0))
+        score = (proj_z * projection_weight) + (live_z * live_weight)
+
+        # Keep live-only breakouts visible while tempering tiny-sample noise.
+        if proj is None and live is not None:
+            score = live_z * max(live_weight, 0.55)
+        elif live is None and proj is not None:
+            score = proj_z * max(projection_weight, 0.35)
+
+        merged.append({
+            "name": str(base.get("name", name_lower.title())),
+            "team": str(base.get("team", "")),
+            "pos": str(base.get("pos", "")),
+            "mlb_id": base.get("mlb_id"),
+            "projection_z_score": round(proj_z, 2),
+            "season_z_score": round(live_z, 2),
+            "delta_z": round(live_z - proj_z, 2),
+            "z_score": round(score, 2),
+            "pos_type": pos_type,
+        })
+
+    merged.sort(key=lambda entry: entry.get("z_score", 0), reverse=True)
+    for i, entry in enumerate(merged[: int(count)], 1):
+        entry["rank"] = i
+    return merged[: int(count)]
+
+
+def _rows_to_z_lookup(df):
+    """Convert a scored DataFrame into a case-insensitive player lookup."""
+    lookup = {}
+    if df is None:
+        return lookup
+    for _, row in df.iterrows():
+        name = str(row.get("Name", "")).strip()
+        if not name:
+            continue
+        lookup[name.lower()] = {
+            "name": name,
+            "team": str(row.get("Team", "")),
+            "pos": str(row.get("Pos", "")),
+            "z_score": round(_safe_float(row.get("Z_Final", 0)), 2),
+            "mlb_id": row.get("mlb_id"),
+        }
+    return lookup
+
+
+def _resolve_mlb_ids_for_players(players):
+    """Resolve MLB IDs only for the final response slice, not the full universe."""
+    for player in players or []:
+        if player.get("mlb_id"):
+            continue
+        name = str(player.get("name", "")).strip()
+        if not name:
+            continue
+        player["mlb_id"] = get_mlb_id(name)
+    return players
+
+
+def _compute_live_scored_frames(pos_type):
+    """Return projection and season-to-date scored frames for the requested player type."""
+    if pos_type == "B":
+        proj_csv = load_hitters_csv()
+        proj_scored = None
+        if proj_csv is not None:
+            proj_scored = compute_hitter_zscores(derive_hitter_stats(proj_csv))
+
+        live_hitters, _live_pitchers = load_live_stats("bat")
+        live_scored = None
+        if live_hitters is not None and len(live_hitters) > 0:
+            live_scored = _compute_hitter_zscores_with_threshold(
+                derive_hitter_stats(live_hitters), 25
+            )
+        return proj_scored, live_scored
+
+    proj_csv = load_pitchers_csv()
+    proj_scored = None
+    if proj_csv is not None:
+        proj_scored = compute_pitcher_zscores(derive_pitcher_stats(proj_csv))
+
+    _live_hitters, live_pitchers = load_live_stats("pit")
+    live_scored = None
+    if live_pitchers is not None and len(live_pitchers) > 0:
+        live_scored = _compute_pitcher_zscores_with_threshold(
+            derive_pitcher_stats(live_pitchers), 8
+        )
+    return proj_scored, live_scored
 
 
 def _live_weight_for_date(today=None):
@@ -1713,7 +1915,8 @@ def cmd_rankings_live(args, as_json=False, enrich=True):
         count,
         live_weight,
     )
-
+    _resolve_mlb_ids_for_players(players)
+    
     if enrich:
         enrich_with_intel(players)
 
