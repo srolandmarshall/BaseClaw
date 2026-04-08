@@ -623,8 +623,13 @@ def calc_ratio_zscore(stat_series, weight_series, negative=False):
 
 def compute_hitter_zscores(df):
     """Compute z-scores for all hitter categories"""
+    return _compute_hitter_zscores_with_threshold(df, MIN_PA)
+
+
+def _compute_hitter_zscores_with_threshold(df, min_pa):
+    """Compute hitter z-scores with a caller-provided PA threshold."""
     # Filter by minimum PA
-    mask = df["PA"] >= MIN_PA
+    mask = df["PA"] >= min_pa
     working = df[mask].copy()
     if len(working) == 0:
         return df.assign(Z_Total=0)
@@ -673,7 +678,12 @@ def compute_hitter_zscores(df):
 
 def compute_pitcher_zscores(df):
     """Compute z-scores for all pitcher categories"""
-    mask = df["IP"] >= MIN_IP
+    return _compute_pitcher_zscores_with_threshold(df, MIN_IP)
+
+
+def _compute_pitcher_zscores_with_threshold(df, min_ip):
+    """Compute pitcher z-scores with a caller-provided IP threshold."""
+    mask = df["IP"] >= min_ip
     working = df[mask].copy()
     if len(working) == 0:
         return df.assign(Z_Total=0)
@@ -1115,6 +1125,108 @@ def load_live_stats():
     except Exception as e:
         print("Warning: live stats fetch failed: " + str(e))
         return None, None
+
+
+def _live_weight_for_date(today=None):
+    """Return the current-season weight for live stats in live rankings."""
+    today = today or date.today()
+    month = int(today.month)
+    if month <= 4:
+        return 0.45
+    if month == 5:
+        return 0.55
+    if month == 6:
+        return 0.65
+    if month == 7:
+        return 0.72
+    return 0.8
+
+
+def _build_live_rankings_from_lookups(proj_lookup, live_lookup, pos_type, count, live_weight):
+    """Blend projection and season-to-date z-scores into a live ranking board."""
+    projection_weight = max(0.0, 1.0 - float(live_weight))
+    merged = []
+    all_names = set(proj_lookup.keys()) | set(live_lookup.keys())
+
+    for name_lower in all_names:
+        proj = proj_lookup.get(name_lower)
+        live = live_lookup.get(name_lower)
+        base = live or proj or {}
+        proj_z = _safe_float((proj or {}).get("z_score", 0))
+        live_z = _safe_float((live or {}).get("z_score", 0))
+        score = (proj_z * projection_weight) + (live_z * live_weight)
+
+        # Keep live-only breakouts visible while tempering tiny-sample noise.
+        if proj is None and live is not None:
+            score = live_z * max(live_weight, 0.55)
+        elif live is None and proj is not None:
+            score = proj_z * max(projection_weight, 0.35)
+
+        merged.append({
+            "name": str(base.get("name", name_lower.title())),
+            "team": str(base.get("team", "")),
+            "pos": str(base.get("pos", "")),
+            "mlb_id": base.get("mlb_id"),
+            "projection_z_score": round(proj_z, 2),
+            "season_z_score": round(live_z, 2),
+            "delta_z": round(live_z - proj_z, 2),
+            "z_score": round(score, 2),
+            "pos_type": pos_type,
+        })
+
+    merged.sort(key=lambda entry: entry.get("z_score", 0), reverse=True)
+    for i, entry in enumerate(merged[: int(count)], 1):
+        entry["rank"] = i
+    return merged[: int(count)]
+
+
+def _rows_to_z_lookup(df):
+    """Convert a scored DataFrame into a case-insensitive player lookup."""
+    lookup = {}
+    if df is None:
+        return lookup
+    for _, row in df.iterrows():
+        name = str(row.get("Name", "")).strip()
+        if not name:
+            continue
+        lookup[name.lower()] = {
+            "name": name,
+            "team": str(row.get("Team", "")),
+            "pos": str(row.get("Pos", "")),
+            "z_score": round(_safe_float(row.get("Z_Final", 0)), 2),
+            "mlb_id": get_mlb_id(name),
+        }
+    return lookup
+
+
+def _compute_live_scored_frames(pos_type):
+    """Return projection and season-to-date scored frames for the requested player type."""
+    if pos_type == "B":
+        proj_csv = load_hitters_csv()
+        proj_scored = None
+        if proj_csv is not None:
+            proj_scored = compute_hitter_zscores(derive_hitter_stats(proj_csv))
+
+        live_hitters, _live_pitchers = load_live_stats()
+        live_scored = None
+        if live_hitters is not None and len(live_hitters) > 0:
+            live_scored = _compute_hitter_zscores_with_threshold(
+                derive_hitter_stats(live_hitters), 25
+            )
+        return proj_scored, live_scored
+
+    proj_csv = load_pitchers_csv()
+    proj_scored = None
+    if proj_csv is not None:
+        proj_scored = compute_pitcher_zscores(derive_pitcher_stats(proj_csv))
+
+    _live_hitters, live_pitchers = load_live_stats()
+    live_scored = None
+    if live_pitchers is not None and len(live_pitchers) > 0:
+        live_scored = _compute_pitcher_zscores_with_threshold(
+            derive_pitcher_stats(live_pitchers), 8
+        )
+    return proj_scored, live_scored
 
 
 def blend_projections_and_actual(proj_df, actual_df, stat_type="bat"):
@@ -1586,6 +1698,61 @@ def cmd_rankings(args, as_json=False, enrich=True):
             print("  " + str(i).rjust(2) + ". " + name.ljust(25) + team.ljust(6) + pos.ljust(8) + "{:.2f}".format(z))
 
 
+def cmd_rankings_live(args, as_json=False, enrich=True):
+    """Show top N players by live in-season score blended with projections."""
+    pos_type = args[0].upper() if args else "B"
+    count = int(args[1]) if len(args) > 1 else 25
+    live_weight = _live_weight_for_date()
+    projection_weight = round(1.0 - live_weight, 2)
+
+    proj_scored, live_scored = _compute_live_scored_frames(pos_type)
+    players = _build_live_rankings_from_lookups(
+        _rows_to_z_lookup(proj_scored),
+        _rows_to_z_lookup(live_scored),
+        pos_type,
+        count,
+        live_weight,
+    )
+
+    if enrich:
+        enrich_with_intel(players)
+
+    payload = {
+        "source": "live_blend",
+        "ranking_mode": "live",
+        "pos_type": pos_type,
+        "players": players,
+        "weights": {
+            "season_to_date": round(live_weight, 2),
+            "projection": projection_weight,
+        },
+        "semantics": (
+            "Season-to-date production blended with projection context. "
+            "Designed for in-season ranking surfaces; not a direct Yahoo mirror."
+        ),
+    }
+
+    if as_json:
+        return payload
+
+    print("Data source: live_blend")
+    print(
+        "Weights: season-to-date="
+        + str(round(live_weight, 2))
+        + " projection="
+        + str(projection_weight)
+    )
+    for player in players:
+        print(
+            str(player.get("rank", "")).rjust(3)
+            + ". "
+            + str(player.get("name", "")).ljust(25)
+            + str(player.get("team", "")).ljust(6)
+            + str(player.get("pos", "")).ljust(8)
+            + "{:.2f}".format(_safe_float(player.get("z_score", 0)))
+        )
+
+
 def cmd_compare(args, as_json=False):
     """Compare two players side by side"""
     if len(args) < 2:
@@ -1948,6 +2115,7 @@ def cmd_zscore_shifts(args, as_json=False):
 
 COMMANDS = {
     "rankings": cmd_rankings,
+    "rankings-live": cmd_rankings_live,
     "compare": cmd_compare,
     "value": cmd_value,
     "import-csv": cmd_import_csv,
@@ -1961,6 +2129,7 @@ if __name__ == "__main__":
         print("Usage: valuations.py <command> [args]")
         print("\nCommands:")
         print("  rankings [B|P] [count]      - Top players by z-score")
+        print("  rankings-live [B|P] [count] - Live in-season rankings blended with projections")
         print("  compare <name1> <name2>     - Compare two players")
         print("  value <name>                - Player z-score breakdown")
         print("  import-csv <filepath>       - Import FanGraphs CSV projections")

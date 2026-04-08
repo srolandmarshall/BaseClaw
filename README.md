@@ -371,11 +371,12 @@ Customize `AGENTS.md` to adjust strategy, risk tolerance, or reporting style.
 </details>
 
 <details>
-<summary><strong>Valuations</strong> (6 tools)</summary>
+<summary><strong>Valuations</strong> (7 tools)</summary>
 
 | Tool | Description |
 |------|-------------|
 | `yahoo_rankings` | Top players ranked by z-score value (consensus projections, park-adjusted) |
+| `GET /api/rankings/live` | Live in-season ranking board blending season-to-date production with projection context; includes `ranking_mode=live`, `season_z_score`, `projection_z_score`, and `delta_z` |
 | `yahoo_compare` | Compare two players side by side with z-score breakdowns |
 | `yahoo_value` | Full z-score breakdown for a player across all categories |
 | `yahoo_projections_update` | Force-refresh projections from FanGraphs (consensus, steamer, zips, or fangraphsdc) |
@@ -505,7 +506,7 @@ The `./yf` helper script provides direct CLI access to all functionality:
 | **Setup** | `discover` |
 | **League** | `info`, `standings`, `roster`, `fa B/P [n]`, `search <name>`, `add <id>`, `drop <id>`, `swap <add> <drop>`, `matchups [week]`, `scoreboard`, `transactions [type] [n]`, `stat-categories`, `player-stats <name> [period] [week]`, `waivers`, `taken-players [position]`, `roster-history [--week N] [--date YYYY-MM-DD]` |
 | **Draft** | `status`, `recommend`, `watch [sec]`, `cheatsheet`, `best-available [B\|P] [n]` |
-| **Valuations** | `rankings [B\|P] [n]`, `compare <name1> <name2>`, `value <name>`, `import-csv <file>`, `generate` |
+| **Valuations** | `rankings [B\|P] [n]`, `rankings-live [B\|P] [n]`, `compare <name1> <name2>`, `value <name>`, `import-csv <file>`, `generate` |
 | **In-Season** | `lineup-optimize [--apply]`, `category-check`, `injury-report`, `waiver-analyze [B\|P] [n]`, `streaming [week]`, `trade-eval <give> <get>`, `daily-update`, `roster-stats [--period season\|week] [--week N]` |
 | **MLB** | `mlb teams`, `mlb roster <tm>`, `mlb stats <id>`, `mlb schedule`, `mlb injuries` |
 | **Browser** | `browser-login`, `browser-status`, `browser-test`, `change-team-name <name>`, `change-team-logo <path>` |
