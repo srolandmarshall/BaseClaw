@@ -195,6 +195,39 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(players[1]["projection_z_score"], 0.0)
         self.assertEqual(players[1]["season_z_score"], 8.5)
 
+    def test_live_rows_to_z_lookup_does_not_resolve_mlb_ids_for_full_universe(self):
+        calls = []
+
+        valuations_module = _load_script(
+            "valuations_live_lookup_defers_mlb_ids_for_test",
+            "valuations.py",
+            {
+                "pandas": _pandas_stub(),
+                "numpy": _numpy_stub(),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda name, *_args, **_kwargs: calls.append(name) or ("mlb-" + str(name))
+                ),
+                "shared": types.SimpleNamespace(enrich_with_intel=lambda *_args, **_kwargs: None),
+                "trace_utils": _trace_utils_stub(),
+            },
+        )
+
+        df = _FakeDataFrame(
+            [
+                {"Name": "Alpha", "Team": "ATL", "Pos": "SP", "Z_Final": 6.0},
+                {"Name": "Beta", "Team": "LAD", "Pos": "SP", "Z_Final": 5.0},
+                {"Name": "Gamma", "Team": "NYM", "Pos": "SP", "Z_Final": 4.0},
+            ]
+        )
+
+        lookup = valuations_module._rows_to_z_lookup(df)
+        self.assertEqual(calls, [])
+        players = valuations_module._build_live_rankings_from_lookups(lookup, {}, "P", 2, 0.45)
+        valuations_module._resolve_mlb_ids_for_players(players)
+        self.assertEqual([player["name"] for player in players], ["Alpha", "Beta"])
+        self.assertEqual(calls, ["Alpha", "Beta"])
+        self.assertEqual(players[0]["mlb_id"], "mlb-Alpha")
+
     def test_live_stats_failures_are_negative_cached(self):
         valuations_module = _load_script(
             "valuations_live_stats_negative_cache_for_test",
@@ -234,6 +267,51 @@ class ReliabilityHardeningTests(unittest.TestCase):
             self.assertEqual(first, (None, None))
             self.assertEqual(second, (None, None))
             self.assertEqual(calls["pit"], 1)
+        finally:
+            if saved_pybaseball is None:
+                sys.modules.pop("pybaseball", None)
+            else:
+                sys.modules["pybaseball"] = saved_pybaseball
+
+    def test_live_stats_timeout_returns_promptly_without_waiting_for_worker(self):
+        valuations_module = _load_script(
+            "valuations_live_stats_timeout_for_test",
+            "valuations.py",
+            {
+                "pandas": _pandas_stub(),
+                "numpy": _numpy_stub(),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "shared": types.SimpleNamespace(enrich_with_intel=lambda *_args, **_kwargs: None),
+                "trace_utils": _trace_utils_stub(),
+            },
+        )
+
+        pybaseball_mod = _module("pybaseball")
+
+        def fake_pitching_stats(_year, qual=1):
+            time.sleep(0.2)
+            return _FakeDataFrame([])
+
+        pybaseball_mod.pitching_stats = fake_pitching_stats
+        pybaseball_mod.batting_stats = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("batting_stats should not run for pit-only requests")
+        )
+
+        saved_pybaseball = sys.modules.get("pybaseball")
+        sys.modules["pybaseball"] = pybaseball_mod
+        try:
+            valuations_module._LIVE_STATS_FETCH_TIMEOUT = 0.01
+            valuations_module._LIVE_STATS_NEGATIVE_TTL = 999
+            valuations_module._live_stats_cache = {
+                "bat": {"data": None, "time": 0.0, "status": "empty"},
+                "pit": {"data": None, "time": 0.0, "status": "empty"},
+            }
+            started = time.monotonic()
+            with patch("builtins.print"):
+                result = valuations_module.load_live_stats("pit")
+            elapsed = time.monotonic() - started
+            self.assertEqual(result, (None, None))
+            self.assertLess(elapsed, 0.1)
         finally:
             if saved_pybaseball is None:
                 sys.modules.pop("pybaseball", None)

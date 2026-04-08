@@ -10,7 +10,6 @@ import time
 import threading
 import urllib.request
 from datetime import date
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 import pandas as pd
 import numpy as np
@@ -1160,25 +1159,44 @@ def _load_live_stats_frame(stats_type):
         from pybaseball import batting_stats, pitching_stats
 
         fetcher = batting_stats if stats_type == "bat" else pitching_stats
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(fetcher, current_year, qual=1)
-            df = future.result(timeout=_LIVE_STATS_FETCH_TIMEOUT)
+        result = {}
+        error = {}
+        done = threading.Event()
+
+        def _run_fetch():
+            try:
+                result["df"] = fetcher(current_year, qual=1)
+            except Exception as exc:
+                error["exc"] = exc
+            finally:
+                done.set()
+
+        # Daemon thread lets the request path return promptly even if an upstream
+        # library call ignores timeouts or blocks deep in I/O.
+        thread = threading.Thread(target=_run_fetch, daemon=True)
+        thread.start()
+
+        if not done.wait(timeout=_LIVE_STATS_FETCH_TIMEOUT):
+            print(
+                "Warning: live stats fetch timed out for "
+                + stats_type
+                + " after "
+                + str(_LIVE_STATS_FETCH_TIMEOUT)
+                + "s"
+            )
+            _store_live_stats_cache(stats_type, None, "error")
+            return None
+
+        if "exc" in error:
+            raise error["exc"]
+
+        df = result.get("df")
         normalized = _normalize_live_stats_frame(df)
         if normalized is not None:
             _store_live_stats_cache(stats_type, normalized, "ok")
         else:
             _store_live_stats_cache(stats_type, None, "error")
         return normalized
-    except FuturesTimeoutError:
-        print(
-            "Warning: live stats fetch timed out for "
-            + stats_type
-            + " after "
-            + str(_LIVE_STATS_FETCH_TIMEOUT)
-            + "s"
-        )
-        _store_live_stats_cache(stats_type, None, "error")
-        return None
     except Exception as e:
         print("Warning: live stats fetch failed for " + stats_type + ": " + str(e))
         _store_live_stats_cache(stats_type, None, "error")
@@ -1264,9 +1282,21 @@ def _rows_to_z_lookup(df):
             "team": str(row.get("Team", "")),
             "pos": str(row.get("Pos", "")),
             "z_score": round(_safe_float(row.get("Z_Final", 0)), 2),
-            "mlb_id": get_mlb_id(name),
+            "mlb_id": row.get("mlb_id"),
         }
     return lookup
+
+
+def _resolve_mlb_ids_for_players(players):
+    """Resolve MLB IDs only for the final response slice, not the full universe."""
+    for player in players or []:
+        if player.get("mlb_id"):
+            continue
+        name = str(player.get("name", "")).strip()
+        if not name:
+            continue
+        player["mlb_id"] = get_mlb_id(name)
+    return players
 
 
 def _compute_live_scored_frames(pos_type):
@@ -1783,6 +1813,7 @@ def cmd_rankings_live(args, as_json=False, enrich=True):
         count,
         live_weight,
     )
+    _resolve_mlb_ids_for_players(players)
 
     if enrich:
         enrich_with_intel(players)
