@@ -195,6 +195,81 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(players[1]["projection_z_score"], 0.0)
         self.assertEqual(players[1]["season_z_score"], 8.5)
 
+    def test_live_stats_failures_are_negative_cached(self):
+        valuations_module = _load_script(
+            "valuations_live_stats_negative_cache_for_test",
+            "valuations.py",
+            {
+                "pandas": _pandas_stub(),
+                "numpy": _numpy_stub(),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "shared": types.SimpleNamespace(enrich_with_intel=lambda *_args, **_kwargs: None),
+                "trace_utils": _trace_utils_stub(),
+            },
+        )
+
+        calls = {"pit": 0}
+        pybaseball_mod = _module("pybaseball")
+
+        def fake_pitching_stats(_year, qual=1):
+            calls["pit"] += 1
+            raise RuntimeError("upstream 403")
+
+        pybaseball_mod.pitching_stats = fake_pitching_stats
+        pybaseball_mod.batting_stats = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("batting_stats should not run for pit-only requests")
+        )
+
+        saved_pybaseball = sys.modules.get("pybaseball")
+        sys.modules["pybaseball"] = pybaseball_mod
+        try:
+            valuations_module._LIVE_STATS_NEGATIVE_TTL = 999
+            valuations_module._live_stats_cache = {
+                "bat": {"data": None, "time": 0.0, "status": "empty"},
+                "pit": {"data": None, "time": 0.0, "status": "empty"},
+            }
+            with patch("builtins.print"):
+                first = valuations_module.load_live_stats("pit")
+                second = valuations_module.load_live_stats("pit")
+            self.assertEqual(first, (None, None))
+            self.assertEqual(second, (None, None))
+            self.assertEqual(calls["pit"], 1)
+        finally:
+            if saved_pybaseball is None:
+                sys.modules.pop("pybaseball", None)
+            else:
+                sys.modules["pybaseball"] = saved_pybaseball
+
+    def test_compute_live_scored_frames_only_fetches_requested_type(self):
+        valuations_module = _load_script(
+            "valuations_live_frames_type_selective_for_test",
+            "valuations.py",
+            {
+                "pandas": _pandas_stub(),
+                "numpy": _numpy_stub(),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "shared": types.SimpleNamespace(enrich_with_intel=lambda *_args, **_kwargs: None),
+                "trace_utils": _trace_utils_stub(),
+            },
+        )
+
+        live_calls = []
+        valuations_module.load_pitchers_csv = lambda: "proj-pitchers"
+        valuations_module.derive_pitcher_stats = lambda df: ("derived-pitchers", df)
+        valuations_module.compute_pitcher_zscores = lambda df: ("projection-scored", df)
+        valuations_module.load_live_stats = lambda stats_type="both": (
+            live_calls.append(stats_type) or (None, "live-pitchers")
+        )
+        valuations_module._compute_pitcher_zscores_with_threshold = (
+            lambda df, min_ip: ("live-scored", df, min_ip)
+        )
+
+        proj_scored, live_scored = valuations_module._compute_live_scored_frames("P")
+
+        self.assertEqual(live_calls, ["pit"])
+        self.assertEqual(proj_scored, ("projection-scored", ("derived-pitchers", "proj-pitchers")))
+        self.assertEqual(live_scored, ("live-scored", ("derived-pitchers", "live-pitchers"), 8))
+
     def test_roster_cmd_accepts_string_selected_position(self):
         mlb_cache_mod = _module("mlb_id_cache")
         mlb_cache_mod.get_mlb_id = lambda name, *args, **kwargs: "mlb-" + str(name)
