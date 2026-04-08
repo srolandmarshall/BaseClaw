@@ -1507,13 +1507,13 @@ _proj_thread = _maybe_start_projection_warmup()
 _RANKINGS_CACHE_TTL = int(os.environ.get("RANKINGS_CACHE_TTL_SECONDS", "600"))  # 10 min default
 _RANKINGS_WARMUP_COUNT = int(os.environ.get("RANKINGS_WARMUP_COUNT", "150"))
 _RANKINGS_WARMUP_POSITIONS = ["C", "1B", "2B", "3B", "SS", "OF", "UTIL"]
-_rankings_cache = {}          # (pos_type, group_by_position, positions, enrich) -> (expires_at, count, result_dict)
+_rankings_cache = {}          # (variant, pos_type, group_by_position, positions, enrich) -> (expires_at, count, result_dict)
 _rankings_cache_lock = threading.Lock()
 
 
-def _rankings_base_key(pos_type, group_by_position, positions, enrich=True):
+def _rankings_base_key(pos_type, group_by_position, positions, enrich=True, variant="default"):
     """Cache key — separate buckets for enriched vs bare rankings."""
-    return (pos_type, bool(group_by_position), tuple(sorted(positions or [])), bool(enrich))
+    return (variant, pos_type, bool(group_by_position), tuple(sorted(positions or [])), bool(enrich))
 
 
 def _slice_rankings_result(result, requested_count):
@@ -1532,9 +1532,9 @@ def _slice_rankings_result(result, requested_count):
     return r
 
 
-def _get_cached_rankings(pos_type, count, group_by_position, positions, enrich=True):
+def _get_cached_rankings(pos_type, count, group_by_position, positions, enrich=True, variant="default"):
     import time
-    key = _rankings_base_key(pos_type, group_by_position, positions, enrich)
+    key = _rankings_base_key(pos_type, group_by_position, positions, enrich, variant)
     with _rankings_cache_lock:
         entry = _rankings_cache.get(key)
         if entry and time.monotonic() < entry[0]:
@@ -1573,11 +1573,11 @@ def _rankings_result_has_players(result):
     return False
 
 
-def _set_cached_rankings(pos_type, count, group_by_position, positions, result, enrich=True):
+def _set_cached_rankings(pos_type, count, group_by_position, positions, result, enrich=True, variant="default"):
     import time
     if not _rankings_result_has_players(result):
         return
-    key = _rankings_base_key(pos_type, group_by_position, positions, enrich)
+    key = _rankings_base_key(pos_type, group_by_position, positions, enrich, variant)
     with _rankings_cache_lock:
         existing = _rankings_cache.get(key)
         # Only overwrite if new result has more players (or cache is empty/expired)
@@ -2228,6 +2228,35 @@ def api_rankings():
         response = _timed_stage("serialization", lambda: jsonify(result))
         _set_cached_rankings(pos_type, count, group_by_position, positions, result, enrich)
         return response
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/rankings/live")
+def api_rankings_live():
+    try:
+        pos_type = request.args.get("pos_type", "B").upper()
+        count = request.args.get("count", "25")
+        enrich = _safe_bool(request.args.get("enrich", "true"))
+
+        cached = _get_cached_rankings(pos_type, count, False, [], enrich, variant="live")
+        if cached is not None:
+            return jsonify(cached)
+
+        if pos_type == "ALL":
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                hitters_future = pool.submit(valuations.cmd_rankings_live, ["B", count], True, enrich)
+                pitchers_future = pool.submit(valuations.cmd_rankings_live, ["P", count], True, enrich)
+                hitters = hitters_future.result()
+                pitchers = pitchers_future.result()
+            result = _grouped_all_payload(hitters, pitchers)
+        else:
+            result = valuations.cmd_rankings_live([pos_type, count], as_json=True, enrich=enrich)
+
+        _set_cached_rankings(pos_type, count, False, [], result, enrich, variant="live")
+        return jsonify(result)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:

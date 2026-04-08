@@ -102,6 +102,26 @@ def _trace_utils_stub():
     return module
 
 
+def _pandas_stub():
+    module = _module("pandas")
+    module.isna = lambda value: value is None
+    module.DataFrame = lambda *args, **kwargs: []
+
+    class _Series(list):
+        pass
+
+    module.Series = _Series
+    return module
+
+
+def _numpy_stub():
+    module = _module("numpy")
+    module.sqrt = lambda value: value ** 0.5
+    module.std = lambda values: 0
+    module.where = lambda condition, yes, no: yes if condition else no
+    return module
+
+
 def _flask_stub():
     module = _module("flask")
 
@@ -139,6 +159,42 @@ def _flask_stub():
 
 
 class ReliabilityHardeningTests(unittest.TestCase):
+    def test_live_rankings_blend_exposes_projection_and_season_deltas(self):
+        valuations_module = _load_script(
+            "valuations_live_blend_for_test",
+            "valuations.py",
+            {
+                "pandas": _pandas_stub(),
+                "numpy": _numpy_stub(),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda name, *_args, **_kwargs: "mlb-" + str(name)),
+                "shared": types.SimpleNamespace(enrich_with_intel=lambda *_args, **_kwargs: None),
+                "trace_utils": _trace_utils_stub(),
+            },
+        )
+
+        players = valuations_module._build_live_rankings_from_lookups(
+            {
+                "projection riser": {"name": "Projection Riser", "team": "ATL", "pos": "SP", "z_score": 3.0, "mlb_id": "mlb-1"},
+                "steady bat": {"name": "Steady Bat", "team": "LAD", "pos": "OF", "z_score": 5.0, "mlb_id": "mlb-2"},
+            },
+            {
+                "projection riser": {"name": "Projection Riser", "team": "ATL", "pos": "SP", "z_score": 9.0, "mlb_id": "mlb-1"},
+                "live only": {"name": "Live Only", "team": "MIA", "pos": "SP", "z_score": 8.5, "mlb_id": "mlb-3"},
+            },
+            "P",
+            3,
+            0.7,
+        )
+
+        self.assertEqual(players[0]["name"], "Projection Riser")
+        self.assertEqual(players[0]["projection_z_score"], 3.0)
+        self.assertEqual(players[0]["season_z_score"], 9.0)
+        self.assertEqual(players[0]["delta_z"], 6.0)
+        self.assertEqual(players[0]["rank"], 1)
+        self.assertEqual(players[1]["name"], "Live Only")
+        self.assertEqual(players[1]["projection_z_score"], 0.0)
+        self.assertEqual(players[1]["season_z_score"], 8.5)
+
     def test_roster_cmd_accepts_string_selected_position(self):
         mlb_cache_mod = _module("mlb_id_cache")
         mlb_cache_mod.get_mlb_id = lambda name, *args, **kwargs: "mlb-" + str(name)
@@ -2580,6 +2636,130 @@ class ReliabilityHardeningTests(unittest.TestCase):
         cached = api_module._get_cached_rankings("ALL", 3, True, ["C", "1B"], True)
 
         self.assertIsNone(cached)
+
+    def test_live_rankings_endpoint_uses_live_variant_cache_and_handler(self):
+        valuations_module = _module("valuations")
+        call_count = {"count": 0}
+
+        def fake_cmd_rankings_live(_args, as_json=False, enrich=True):
+            call_count["count"] += 1
+            return {
+                "players": [
+                    {
+                        "rank": 1,
+                        "name": "Sandy Alcantara",
+                        "team": "MIA",
+                        "pos": "SP",
+                        "z_score": 8.8,
+                        "projection_z_score": 4.2,
+                        "season_z_score": 11.1,
+                        "delta_z": 6.9,
+                    }
+                ],
+                "pos_type": "P",
+                "source": "live_blend",
+                "weights": {"season_to_date": 0.7, "projection": 0.3},
+            }
+
+        valuations_module.cmd_rankings = lambda *_args, **_kwargs: {"players": []}
+        valuations_module.cmd_rankings_live = fake_cmd_rankings_live
+        valuations_module.ensure_projections = lambda *_args, **_kwargs: {}
+
+        api_module = _load_script(
+            "api_server_live_rankings_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": valuations_module,
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        api_module.request.args = {"pos_type": "P", "count": "5"}
+        first_payload = api_module.api_rankings_live()
+        second_payload = api_module.api_rankings_live()
+
+        self.assertEqual(first_payload["players"][0]["name"], "Sandy Alcantara")
+        self.assertEqual(second_payload["players"][0]["delta_z"], 6.9)
+        self.assertEqual(call_count["count"], 1)
+
+    def test_live_rankings_endpoint_applies_hitter_position_filters(self):
+        valuations_module = _module("valuations")
+        valuations_module.cmd_rankings = lambda *_args, **_kwargs: {"players": []}
+        valuations_module.cmd_rankings_live = lambda *_args, **_kwargs: {
+            "players": [
+                {"rank": 1, "name": "Multi Bat", "team": "ATL", "pos": "1B/OF", "z_score": 7.2},
+                {"rank": 2, "name": "Catcher Bat", "team": "SEA", "pos": "C", "z_score": 6.4},
+            ],
+            "pos_type": "B",
+            "source": "live_blend",
+            "ranking_mode": "live",
+        }
+        valuations_module.ensure_projections = lambda *_args, **_kwargs: {}
+
+        api_module = _load_script(
+            "api_server_live_rankings_hitter_filters_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": valuations_module,
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        normalize_calls = []
+
+        def fake_normalize(payload, rows_key, requested_positions, group_by_position, token_fn):
+            normalize_calls.append((rows_key, requested_positions, group_by_position))
+            filtered = [
+                player for player in payload[rows_key]
+                if "OF" in token_fn(player)
+            ]
+            result = dict(payload)
+            result[rows_key] = filtered
+            result["buckets"] = {"OF": filtered}
+            return result
+
+        api_module._normalize_hitter_payload = fake_normalize
+        api_module._parse_hitter_positions_csv = lambda _value: ["OF"]
+        api_module.request.args = {
+            "pos_type": "B",
+            "count": "5",
+            "group_by_position": "true",
+            "positions": "OF",
+        }
+
+        payload = api_module.api_rankings_live()
+
+        self.assertEqual(normalize_calls, [("players", ["OF"], True)])
+        self.assertEqual([player["name"] for player in payload["players"]], ["Multi Bat"])
+        self.assertEqual(payload["buckets"]["OF"][0]["name"], "Multi Bat")
 
     def test_free_agents_combines_waivers_and_true_free_agents(self):
         mlb_cache_mod = _module("mlb_id_cache")
