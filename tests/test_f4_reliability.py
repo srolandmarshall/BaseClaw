@@ -2432,6 +2432,68 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(payload["players"][0]["name"], "Fast FA")
         self.assertEqual(payload["players"][0]["z_score"], 2.75)
 
+    def test_search_uses_cached_available_players_pool_instead_of_live_free_agent_scans(self):
+        yahoo_api_mod = _module("yahoo_fantasy_api")
+        yahoo_oauth_mod = _module("yahoo_oauth")
+        yahoo_oauth_mod.OAuth2 = object
+        mlb_cache_mod = _module("mlb_id_cache")
+        mlb_cache_mod.get_mlb_id = lambda name, *_args, **_kwargs: 668901 if name == "Mark Vientos" else None
+
+        available_calls = []
+        shared = _shared_stub()
+        shared.get_available_players = None
+
+        module = _load_script(
+            "yahoo_fantasy_search_cache_test",
+            "yahoo-fantasy.py",
+            {
+                "shared": shared,
+                "yahoo_fantasy_api": yahoo_api_mod,
+                "yahoo_oauth": yahoo_oauth_mod,
+                "mlb_id_cache": mlb_cache_mod,
+                "yahoo_browser": types.SimpleNamespace(
+                    is_scope_error=lambda *_args, **_kwargs: False,
+                    write_method=lambda *_args, **_kwargs: None,
+                ),
+            },
+        )
+
+        def fake_available_players(pos_type="B", count=None):
+            available_calls.append((pos_type, count))
+            return [
+                {
+                    "name": "Mark Vientos",
+                    "player_id": "123",
+                    "positions": ["3B", "Util"],
+                    "eligible_positions": ["3B", "Util"],
+                    "percent_owned": 87,
+                    "team": "NYM",
+                    "team_abbr": "NYM",
+                    "status": "",
+                    "mlb_id": 668901,
+                    "availability_type": "free_agent",
+                },
+                {
+                    "name": "Other Player",
+                    "player_id": "456",
+                    "eligible_positions": ["OF"],
+                    "percent_owned": 12,
+                },
+            ]
+
+        module.get_available_players = fake_available_players
+        module.get_league = lambda: (_ for _ in ()).throw(AssertionError("live Yahoo league scan should not run"))
+
+        payload = module.cmd_search(["Mark", "Vientos"], as_json=True)
+
+        self.assertEqual(available_calls, [("ALL", None)])
+        self.assertEqual(len(payload["results"]), 1)
+        self.assertEqual(payload["results"][0]["name"], "Mark Vientos")
+        self.assertEqual(payload["results"][0]["player_id"], "123")
+        self.assertEqual(payload["results"][0]["eligible_positions"], ["3B", "Util"])
+        self.assertEqual(payload["results"][0]["team"], "NYM")
+        self.assertEqual(payload["results"][0]["mlb_id"], 668901)
+
     def test_rankings_endpoint_bypasses_cached_empty_payload_after_recovery(self):
         valuations_module = _module("valuations")
         call_count = {"count": 0}

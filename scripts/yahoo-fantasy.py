@@ -578,14 +578,11 @@ def cmd_search(args, as_json=False):
         print("Usage: search PLAYER_NAME")
         return
     name = " ".join(args)
-    sc, gm, lg = get_league()
-
+    name_lower = name.lower()
     results = []
-    for pos_type in ["B", "P"]:
-        fa = lg.free_agents(pos_type)
-        for p in fa:
-            if name.lower() in p.get("name", "").lower():
-                results.append(p)
+    for p in get_available_players("ALL"):
+        if name_lower in str(p.get("name", "")).lower():
+            results.append(p)
 
     if as_json:
         players = []
@@ -594,12 +591,16 @@ def cmd_search(args, as_json=False):
                 {
                     "name": p.get("name", "Unknown"),
                     "player_id": p.get("player_id", "?"),
-                    "positions": p.get("eligible_positions", ["?"]),
+                    "positions": p.get("eligible_positions") or p.get("positions", ["?"]),
+                    "eligible_positions": p.get("eligible_positions") or p.get("positions", ["?"]),
                     "percent_owned": p.get("percent_owned", 0),
-                    "mlb_id": get_mlb_id(p.get("name", "")),
+                    "team": p.get("team", ""),
+                    "team_abbr": p.get("team_abbr", p.get("team", "")),
+                    "status": p.get("status", ""),
+                    "mlb_id": p.get("mlb_id") or get_mlb_id(p.get("name", "")),
+                    "availability_type": p.get("availability_type", ""),
                 }
             )
-        enrich_with_intel(players)
         return {"query": name, "results": players}
 
     if not results:
