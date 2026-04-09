@@ -10,6 +10,7 @@ import importlib
 import time
 import json
 import hashlib
+import threading
 import urllib.request
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
@@ -54,6 +55,8 @@ _DASHBOARD_CACHE = {}
 _DASHBOARD_CACHE_DIR = os.path.join(os.environ.get("DATA_DIR", "/app/data"), "dashboard-cache")
 _OPERATOR_SCOREBOARD_TZ = ZoneInfo("America/New_York")
 _MLB_MEDIA_GATEWAY_URL = "https://media-gateway.mlb.com/graphql"
+_team_state_singleflight_guard = threading.Lock()
+_TEAM_STATE_SINGLEFLIGHT_LOCKS = {}
 
 
 def _dashboard_cache_file(key):
@@ -62,22 +65,30 @@ def _dashboard_cache_file(key):
     return os.path.join(_DASHBOARD_CACHE_DIR, prefix + "-" + digest + ".json")
 
 
-def _dashboard_cache_get(key, ttl_seconds):
+def _dashboard_cache_peek(key):
     entry = _DASHBOARD_CACHE.get(key)
     if not entry:
         path = _dashboard_cache_file(key)
         try:
-            if os.path.exists(path) and time.time() - os.path.getmtime(path) <= ttl_seconds:
+            if os.path.exists(path):
+                age = time.time() - os.path.getmtime(path)
                 with open(path) as handle:
                     payload = json.load(handle)
                 _DASHBOARD_CACHE[key] = (payload, time.time())
-                return payload
+                return payload, age
         except Exception:
             return None
         return None
     payload, ts = entry
-    if time.time() - ts > ttl_seconds:
-        _DASHBOARD_CACHE.pop(key, None)
+    return payload, time.time() - ts
+
+
+def _dashboard_cache_get(key, ttl_seconds):
+    entry = _dashboard_cache_peek(key)
+    if entry is None:
+        return None
+    payload, age = entry
+    if age > ttl_seconds:
         return None
     return payload
 
@@ -105,6 +116,15 @@ def _dashboard_cache_delete_prefix(prefix):
                 os.remove(os.path.join(_DASHBOARD_CACHE_DIR, filename))
     except Exception:
         pass
+
+
+def _singleflight_lock(key):
+    with _team_state_singleflight_guard:
+        lock = _TEAM_STATE_SINGLEFLIGHT_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _TEAM_STATE_SINGLEFLIGHT_LOCKS[key] = lock
+        return lock
 
 
 def _invalidate_team_state_caches():
@@ -2917,11 +2937,48 @@ def api_waivers():
 
 @app.route("/api/taken-players")
 def api_taken_players():
+    _TIMEOUT = int(os.environ.get("TAKEN_PLAYERS_TIMEOUT_SECONDS", "15"))
+    _FRESH_TTL = int(os.environ.get("TAKEN_PLAYERS_CACHE_TTL_SECONDS", "120"))
+    _STALE_TTL = int(os.environ.get("TAKEN_PLAYERS_STALE_CACHE_TTL_SECONDS", "900"))
     try:
         position = request.args.get("position", "")
+        normalized_position = str(position or "").upper()
+        cache_key = ("taken-players", normalized_position)
+        cached = _dashboard_cache_get(cache_key, _FRESH_TTL)
+        if cached is not None:
+            return jsonify(cached)
+
+        stale = _dashboard_cache_get(cache_key, _STALE_TTL)
+        lock = _singleflight_lock(cache_key)
+        if not lock.acquire(blocking=False):
+            if stale is not None:
+                return jsonify(stale)
+            fallback = {"players": [], "position": position or None, "count": 0, "degraded": True}
+            return jsonify(fallback)
+
+        cached = _dashboard_cache_get(cache_key, _FRESH_TTL)
+        if cached is not None:
+            lock.release()
+            return jsonify(cached)
+
         args = [position] if position else []
-        result = yahoo_fantasy.cmd_taken_players(args, as_json=True)
-        return jsonify(result)
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
+            future = pool.submit(yahoo_fantasy.cmd_taken_players, args, True)
+            done, _ = wait([future], timeout=_TIMEOUT)
+            if not done:
+                if stale is not None:
+                    return jsonify(stale)
+                fallback = {"players": [], "position": position or None, "count": 0, "degraded": True}
+                return jsonify(fallback)
+
+            result = future.result()
+            if isinstance(result, dict) and "players" in result:
+                _dashboard_cache_set(cache_key, result)
+            return jsonify(result)
+        finally:
+            pool.shutdown(wait=False)
+            lock.release()
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

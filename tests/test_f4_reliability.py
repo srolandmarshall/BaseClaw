@@ -1649,6 +1649,103 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
         self.assertEqual(resolved.isoformat(), "2026-03-25")
 
+    def test_taken_players_returns_stale_cache_when_refresh_times_out(self):
+        yahoo_module = _module("yahoo-fantasy")
+        yahoo_module.cmd_taken_players = lambda *_args, **_kwargs: {"players": [{"name": "Fresh"}], "count": 1}
+
+        api_module = _load_script(
+            "api_server_taken_players_timeout_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": yahoo_module,
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        stale_payload = {"players": [{"name": "Cached"}], "position": None, "count": 1}
+        api_module.request.args = {}
+        api_module._DASHBOARD_CACHE = {("taken-players", ""): (stale_payload, time.time())}
+
+        class FakeFuture:
+            pass
+
+        class FakePool:
+            def submit(self, *_args, **_kwargs):
+                return FakeFuture()
+
+            def shutdown(self, wait=False):
+                return None
+
+        api_module.ThreadPoolExecutor = lambda max_workers=1: FakePool()
+        api_module.wait = lambda futures, timeout=None: (set(), set(futures))
+
+        payload = api_module.api_taken_players()
+
+        self.assertEqual(payload, stale_payload)
+
+    def test_taken_players_returns_stale_cache_when_refresh_lock_is_held(self):
+        yahoo_module = _module("yahoo-fantasy")
+        called = {"count": 0}
+
+        def _unexpected_fetch(*_args, **_kwargs):
+            called["count"] += 1
+            return {"players": [{"name": "Fresh"}], "count": 1}
+
+        yahoo_module.cmd_taken_players = _unexpected_fetch
+
+        api_module = _load_script(
+            "api_server_taken_players_singleflight_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": yahoo_module,
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        stale_payload = {"players": [{"name": "Cached"}], "position": None, "count": 1}
+        cache_key = ("taken-players", "")
+        api_module.request.args = {}
+        api_module._DASHBOARD_CACHE = {cache_key: (stale_payload, time.time() - 180)}
+        held_lock = threading.Lock()
+        held_lock.acquire()
+        api_module._TEAM_STATE_SINGLEFLIGHT_LOCKS = {cache_key: held_lock}
+
+        try:
+            payload = api_module.api_taken_players()
+        finally:
+            held_lock.release()
+
+        self.assertEqual(payload, stale_payload)
+        self.assertEqual(called["count"], 0)
+
     def test_operator_scoreboard_endpoint_rejects_invalid_date_param(self):
         api_module = _load_script(
             "api_server_operator_scoreboard_invalid_date_for_test",
