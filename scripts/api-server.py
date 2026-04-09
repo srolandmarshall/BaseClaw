@@ -71,10 +71,11 @@ def _dashboard_cache_peek(key):
         path = _dashboard_cache_file(key)
         try:
             if os.path.exists(path):
-                age = time.time() - os.path.getmtime(path)
+                fetched_at = os.path.getmtime(path)
+                age = time.time() - fetched_at
                 with open(path) as handle:
                     payload = json.load(handle)
-                _DASHBOARD_CACHE[key] = (payload, time.time())
+                _DASHBOARD_CACHE[key] = (payload, fetched_at)
                 return payload, age
         except Exception:
             return None
@@ -125,6 +126,23 @@ def _singleflight_lock(key):
             lock = threading.Lock()
             _TEAM_STATE_SINGLEFLIGHT_LOCKS[key] = lock
         return lock
+
+
+def _taken_players_fallback(position):
+    return {"players": [], "position": position or None, "count": 0, "degraded": True}
+
+
+def _refresh_taken_players_async(cache_key, args, lock, done_event, result_holder):
+    try:
+        result = yahoo_fantasy.cmd_taken_players(args, as_json=True)
+        result_holder["result"] = result
+        if isinstance(result, dict) and "players" in result:
+            _dashboard_cache_set(cache_key, result)
+    except Exception as exc:
+        result_holder["error"] = exc
+    finally:
+        done_event.set()
+        lock.release()
 
 
 def _invalidate_team_state_caches():
@@ -2953,8 +2971,7 @@ def api_taken_players():
         if not lock.acquire(blocking=False):
             if stale is not None:
                 return jsonify(stale)
-            fallback = {"players": [], "position": position or None, "count": 0, "degraded": True}
-            return jsonify(fallback)
+            return jsonify(_taken_players_fallback(position))
 
         cached = _dashboard_cache_get(cache_key, _FRESH_TTL)
         if cached is not None:
@@ -2962,23 +2979,33 @@ def api_taken_players():
             return jsonify(cached)
 
         args = [position] if position else []
-        pool = ThreadPoolExecutor(max_workers=1)
+        worker_started = False
         try:
-            future = pool.submit(yahoo_fantasy.cmd_taken_players, args, True)
-            done, _ = wait([future], timeout=_TIMEOUT)
-            if not done:
+            done_event = threading.Event()
+            result_holder = {}
+            worker = threading.Thread(
+                target=_refresh_taken_players_async,
+                args=(cache_key, args, lock, done_event, result_holder),
+                daemon=True,
+            )
+            worker.start()
+            worker_started = True
+            if not done_event.wait(timeout=_TIMEOUT):
                 if stale is not None:
                     return jsonify(stale)
-                fallback = {"players": [], "position": position or None, "count": 0, "degraded": True}
-                return jsonify(fallback)
+                return jsonify(_taken_players_fallback(position))
 
-            result = future.result()
-            if isinstance(result, dict) and "players" in result:
-                _dashboard_cache_set(cache_key, result)
+            error = result_holder.get("error")
+            if error is not None:
+                if stale is not None:
+                    return jsonify(stale)
+                raise error
+            result = result_holder.get("result")
             return jsonify(result)
-        finally:
-            pool.shutdown(wait=False)
-            lock.release()
+        except Exception:
+            if not worker_started:
+                lock.release()
+            raise
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

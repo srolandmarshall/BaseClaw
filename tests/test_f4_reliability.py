@@ -2,6 +2,7 @@ import importlib.util
 import json
 import pathlib
 import sys
+import tempfile
 import threading
 import time
 import types
@@ -1651,7 +1652,17 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
     def test_taken_players_returns_stale_cache_when_refresh_times_out(self):
         yahoo_module = _module("yahoo-fantasy")
-        yahoo_module.cmd_taken_players = lambda *_args, **_kwargs: {"players": [{"name": "Fresh"}], "count": 1}
+        started = threading.Event()
+        release = threading.Event()
+        calls = {"count": 0}
+
+        def _blocking_fetch(*_args, **_kwargs):
+            calls["count"] += 1
+            started.set()
+            release.wait(timeout=1.0)
+            return {"players": [{"name": "Fresh"}], "count": 1}
+
+        yahoo_module.cmd_taken_players = _blocking_fetch
 
         api_module = _load_script(
             "api_server_taken_players_timeout_for_test",
@@ -1677,25 +1688,26 @@ class ReliabilityHardeningTests(unittest.TestCase):
         )
 
         stale_payload = {"players": [{"name": "Cached"}], "position": None, "count": 1}
+        api_module.os.environ["TAKEN_PLAYERS_TIMEOUT_SECONDS"] = "0"
         api_module.request.args = {}
-        api_module._DASHBOARD_CACHE = {("taken-players", ""): (stale_payload, time.time())}
-
-        class FakeFuture:
-            pass
-
-        class FakePool:
-            def submit(self, *_args, **_kwargs):
-                return FakeFuture()
-
-            def shutdown(self, wait=False):
-                return None
-
-        api_module.ThreadPoolExecutor = lambda max_workers=1: FakePool()
-        api_module.wait = lambda futures, timeout=None: (set(), set(futures))
-
+        api_module._DASHBOARD_CACHE = {("taken-players", ""): (stale_payload, time.time() - 180)}
         payload = api_module.api_taken_players()
 
         self.assertEqual(payload, stale_payload)
+        self.assertTrue(started.wait(timeout=1.0))
+        lock = api_module._TEAM_STATE_SINGLEFLIGHT_LOCKS[("taken-players", "")]
+        self.assertTrue(lock.locked())
+
+        second = api_module.api_taken_players()
+        self.assertEqual(second, stale_payload)
+        self.assertEqual(calls["count"], 1)
+
+        release.set()
+        for _ in range(20):
+            if not lock.locked():
+                break
+            time.sleep(0.01)
+        self.assertFalse(lock.locked())
 
     def test_taken_players_returns_stale_cache_when_refresh_lock_is_held(self):
         yahoo_module = _module("yahoo-fantasy")
@@ -1745,6 +1757,46 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
         self.assertEqual(payload, stale_payload)
         self.assertEqual(called["count"], 0)
+
+    def test_dashboard_cache_peek_keeps_file_backed_entry_age(self):
+        api_module = _load_script(
+            "api_server_dashboard_cache_age_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        key = ("taken-players", "")
+        api_module._DASHBOARD_CACHE = {}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_path = pathlib.Path(tmpdir) / "taken-players.json"
+            cache_path.write_text(json.dumps({"players": [{"name": "Cached"}], "count": 1}))
+            stale_age = time.time() - 1000
+            api_module.os.utime(cache_path, (stale_age, stale_age))
+            api_module._dashboard_cache_file = lambda _key: str(cache_path)
+
+            first = api_module._dashboard_cache_get(key, 10)
+            second = api_module._dashboard_cache_get(key, 10)
+
+        self.assertIsNone(first)
+        self.assertIsNone(second)
 
     def test_operator_scoreboard_endpoint_rejects_invalid_date_param(self):
         api_module = _load_script(
