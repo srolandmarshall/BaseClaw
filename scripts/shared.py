@@ -476,6 +476,7 @@ def get_league_settings():
 # ---------------------------------------------------------------------------
 TEAM_ALIASES = {
     "ARI": "Arizona Diamondbacks",
+    "AZ": "Arizona Diamondbacks",
     "D-backs": "Arizona Diamondbacks",
     "Diamondbacks": "Arizona Diamondbacks",
     "ATL": "Atlanta Braves",

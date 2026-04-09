@@ -195,6 +195,183 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(players[1]["projection_z_score"], 0.0)
         self.assertEqual(players[1]["season_z_score"], 8.5)
 
+    def test_live_weight_contract_is_seventy_five_percent_season(self):
+        valuations_module = _load_script(
+            "valuations_live_weight_contract_for_test",
+            "valuations.py",
+            {
+                "pandas": _pandas_stub(),
+                "numpy": _numpy_stub(),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "shared": types.SimpleNamespace(
+                    enrich_with_intel=lambda *_args, **_kwargs: None,
+                    mlb_fetch=lambda *_args, **_kwargs: {},
+                ),
+                "trace_utils": _trace_utils_stub(),
+            },
+        )
+
+        self.assertEqual(valuations_module._live_weight_for_date(), 0.75)
+
+    def test_live_stats_from_mlb_normalizes_team_names_to_abbreviations(self):
+        def fake_mlb_fetch(endpoint):
+            if endpoint == "/teams?sportId=1":
+                return {
+                    "teams": [
+                        {"id": 121, "name": "New York Mets", "abbreviation": "NYM"},
+                    ]
+                }
+            return {
+                "stats": [
+                    {
+                        "splits": [
+                            {
+                                "stat": {
+                                    "plateAppearances": 10,
+                                    "atBats": 8,
+                                    "hits": 4,
+                                    "homeRuns": 1,
+                                    "runs": 2,
+                                    "rbi": 3,
+                                    "stolenBases": 0,
+                                    "caughtStealing": 0,
+                                    "baseOnBalls": 2,
+                                    "strikeOuts": 1,
+                                    "avg": ".500",
+                                    "obp": ".600",
+                                    "slg": ".875",
+                                    "doubles": 0,
+                                    "triples": 1,
+                                },
+                                "player": {"id": 677595, "fullName": "Ronny Mauricio"},
+                                "team": {"id": 121, "name": "New York Mets"},
+                                "position": {"abbreviation": "2B"},
+                            }
+                        ]
+                    }
+                ]
+            }
+
+        valuations_module = _load_script(
+            "valuations_live_team_abbr_for_test",
+            "valuations.py",
+            {
+                "pandas": _pandas_stub(),
+                "numpy": _numpy_stub(),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "shared": types.SimpleNamespace(
+                    enrich_with_intel=lambda *_args, **_kwargs: None,
+                    mlb_fetch=fake_mlb_fetch,
+                ),
+                "trace_utils": _trace_utils_stub(),
+            },
+        )
+
+        valuations_module.pd.DataFrame = lambda rows: _FakeDataFrame(rows)
+        valuations_module._normalize_live_stats_frame = lambda df: df
+        frame = valuations_module._load_live_stats_from_mlb("bat")
+        rows = list(frame.iterrows())
+        self.assertEqual(rows[0][1]["Team"], "NYM")
+
+    def test_canonical_team_abbr_normalizes_alias_variants(self):
+        valuations_module = _load_script(
+            "valuations_team_alias_canonicalization_for_test",
+            "valuations.py",
+            {
+                "pandas": _pandas_stub(),
+                "numpy": _numpy_stub(),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "shared": types.SimpleNamespace(
+                    enrich_with_intel=lambda *_args, **_kwargs: None,
+                    mlb_fetch=lambda *_args, **_kwargs: {},
+                    TEAM_ALIASES={"AZ": "Arizona Diamondbacks", "ARI": "Arizona Diamondbacks"},
+                ),
+                "trace_utils": _trace_utils_stub(),
+            },
+        )
+
+        self.assertEqual(valuations_module._canonical_team_abbr("AZ"), "ARI")
+        self.assertEqual(valuations_module._canonical_team_abbr("ARI"), "ARI")
+
+    def test_live_stats_from_mlb_classifies_any_started_pitcher_as_sp(self):
+        def fake_mlb_fetch(endpoint):
+            if endpoint == "/teams?sportId=1":
+                return {
+                    "teams": [
+                        {"id": 112, "name": "Chicago Cubs", "abbreviation": "CHC"},
+                    ]
+                }
+            return {
+                "stats": [
+                    {
+                        "splits": [
+                            {
+                                "stat": {
+                                    "gamesStarted": 1,
+                                    "gamesPlayed": 3,
+                                    "inningsPitched": "9.2",
+                                    "wins": 0,
+                                    "losses": 0,
+                                    "era": "3.72",
+                                    "whip": "1.24",
+                                    "strikeOuts": 10,
+                                    "baseOnBalls": 2,
+                                    "saves": 1,
+                                    "holds": 0,
+                                    "earnedRuns": 4,
+                                    "qualityStarts": 0,
+                                },
+                                "player": {"id": 607067, "fullName": "Colin Rea"},
+                                "team": {"id": 112, "name": "Chicago Cubs"},
+                                "position": {"abbreviation": "P"},
+                            }
+                        ]
+                    }
+                ]
+            }
+
+        valuations_module = _load_script(
+            "valuations_live_pitcher_role_for_test",
+            "valuations.py",
+            {
+                "pandas": _pandas_stub(),
+                "numpy": _numpy_stub(),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "shared": types.SimpleNamespace(
+                    enrich_with_intel=lambda *_args, **_kwargs: None,
+                    mlb_fetch=fake_mlb_fetch,
+                    TEAM_ALIASES={},
+                ),
+                "trace_utils": _trace_utils_stub(),
+            },
+        )
+
+        valuations_module.pd.DataFrame = lambda rows: _FakeDataFrame(rows)
+        valuations_module._normalize_live_stats_frame = lambda df: df
+        frame = valuations_module._load_live_stats_from_mlb("pit")
+        rows = list(frame.iterrows())
+        self.assertEqual(rows[0][1]["Pos"], "SP")
+
+    def test_live_pitcher_pos_bonus_removes_reliever_bump(self):
+        valuations_module = _load_script(
+            "valuations_live_pitcher_bonus_for_test",
+            "valuations.py",
+            {
+                "pandas": _pandas_stub(),
+                "numpy": _numpy_stub(),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "shared": types.SimpleNamespace(
+                    enrich_with_intel=lambda *_args, **_kwargs: None,
+                    mlb_fetch=lambda *_args, **_kwargs: {},
+                    TEAM_ALIASES={},
+                ),
+                "trace_utils": _trace_utils_stub(),
+            },
+        )
+
+        self.assertEqual(valuations_module._get_live_pitcher_pos_bonus("RP"), 0)
+        self.assertEqual(valuations_module._get_live_pitcher_pos_bonus("SP"), 0)
+
     def test_live_rows_to_z_lookup_does_not_resolve_mlb_ids_for_full_universe(self):
         calls = []
 
@@ -267,6 +444,48 @@ class ReliabilityHardeningTests(unittest.TestCase):
             self.assertEqual(first, (None, None))
             self.assertEqual(second, (None, None))
             self.assertEqual(calls["pit"], 1)
+        finally:
+            if saved_pybaseball is None:
+                sys.modules.pop("pybaseball", None)
+            else:
+                sys.modules["pybaseball"] = saved_pybaseball
+
+    def test_live_stats_prefers_official_mlb_feed_before_pybaseball(self):
+        valuations_module = _load_script(
+            "valuations_live_stats_official_feed_for_test",
+            "valuations.py",
+            {
+                "pandas": _pandas_stub(),
+                "numpy": _numpy_stub(),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "shared": types.SimpleNamespace(
+                    enrich_with_intel=lambda *_args, **_kwargs: None,
+                    mlb_fetch=lambda *_args, **_kwargs: {},
+                ),
+                "trace_utils": _trace_utils_stub(),
+            },
+        )
+
+        official_rows = _FakeDataFrame([{"Name": "Official Feed"}])
+        valuations_module._live_stats_cache = {
+            "bat": {"data": None, "time": 0.0, "status": "empty"},
+            "pit": {"data": None, "time": 0.0, "status": "empty"},
+        }
+        valuations_module._load_live_stats_from_mlb = lambda stats_type: official_rows
+
+        pybaseball_mod = _module("pybaseball")
+        pybaseball_mod.batting_stats = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("pybaseball batting_stats should not run when MLB feed succeeds")
+        )
+        pybaseball_mod.pitching_stats = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("pybaseball pitching_stats should not run when MLB feed succeeds")
+        )
+
+        saved_pybaseball = sys.modules.get("pybaseball")
+        sys.modules["pybaseball"] = pybaseball_mod
+        try:
+            result = valuations_module._load_live_stats_frame("bat")
+            self.assertIs(result, official_rows)
         finally:
             if saved_pybaseball is None:
                 sys.modules.pop("pybaseball", None)
