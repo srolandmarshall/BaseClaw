@@ -56,7 +56,7 @@ _DASHBOARD_CACHE_DIR = os.path.join(os.environ.get("DATA_DIR", "/app/data"), "da
 _OPERATOR_SCOREBOARD_TZ = ZoneInfo("America/New_York")
 _MLB_MEDIA_GATEWAY_URL = "https://media-gateway.mlb.com/graphql"
 _team_state_singleflight_guard = threading.Lock()
-_TEAM_STATE_SINGLEFLIGHT_LOCKS = {}
+_TEAM_STATE_SINGLEFLIGHT = {}
 
 
 def _dashboard_cache_file(key):
@@ -71,10 +71,11 @@ def _dashboard_cache_peek(key):
         path = _dashboard_cache_file(key)
         try:
             if os.path.exists(path):
-                age = time.time() - os.path.getmtime(path)
+                fetched_at = os.path.getmtime(path)
+                age = time.time() - fetched_at
                 with open(path) as handle:
                     payload = json.load(handle)
-                _DASHBOARD_CACHE[key] = (payload, time.time())
+                _DASHBOARD_CACHE[key] = (payload, fetched_at)
                 return payload, age
         except Exception:
             return None
@@ -118,13 +119,63 @@ def _dashboard_cache_delete_prefix(prefix):
         pass
 
 
-def _singleflight_lock(key):
+def _singleflight_entry(key, lease_seconds):
+    now = time.time()
     with _team_state_singleflight_guard:
-        lock = _TEAM_STATE_SINGLEFLIGHT_LOCKS.get(key)
+        entry = _TEAM_STATE_SINGLEFLIGHT.get(key)
+        if entry is None:
+            entry = {"lock": threading.Lock(), "started_at": 0.0}
+            _TEAM_STATE_SINGLEFLIGHT[key] = entry
+            return entry
+
+        lock = entry.get("lock")
+        started_at = float(entry.get("started_at", 0.0) or 0.0)
         if lock is None:
-            lock = threading.Lock()
-            _TEAM_STATE_SINGLEFLIGHT_LOCKS[key] = lock
-        return lock
+            entry = {"lock": threading.Lock(), "started_at": 0.0}
+            _TEAM_STATE_SINGLEFLIGHT[key] = entry
+            return entry
+
+        if lock.locked() and started_at and now - started_at > lease_seconds:
+            entry = {"lock": threading.Lock(), "started_at": 0.0}
+            _TEAM_STATE_SINGLEFLIGHT[key] = entry
+            return entry
+
+        if not lock.locked():
+            entry["started_at"] = 0.0
+        return entry
+
+
+def _mark_singleflight_started(key, lock):
+    with _team_state_singleflight_guard:
+        entry = _TEAM_STATE_SINGLEFLIGHT.get(key)
+        if entry and entry.get("lock") is lock:
+            entry["started_at"] = time.time()
+
+
+def _release_singleflight(key, lock):
+    with _team_state_singleflight_guard:
+        entry = _TEAM_STATE_SINGLEFLIGHT.get(key)
+        if entry and entry.get("lock") is lock:
+            entry["started_at"] = 0.0
+    if lock.locked():
+        lock.release()
+
+
+def _taken_players_fallback(position):
+    return {"players": [], "position": position or None, "count": 0, "degraded": True}
+
+
+def _refresh_taken_players_async(cache_key, args, lock, done_event, result_holder):
+    try:
+        result = yahoo_fantasy.cmd_taken_players(args, as_json=True)
+        result_holder["result"] = result
+        if isinstance(result, dict) and "players" in result:
+            _dashboard_cache_set(cache_key, result)
+    except Exception as exc:
+        result_holder["error"] = exc
+    finally:
+        done_event.set()
+        _release_singleflight(cache_key, lock)
 
 
 def _invalidate_team_state_caches():
@@ -2940,6 +2991,7 @@ def api_taken_players():
     _TIMEOUT = int(os.environ.get("TAKEN_PLAYERS_TIMEOUT_SECONDS", "15"))
     _FRESH_TTL = int(os.environ.get("TAKEN_PLAYERS_CACHE_TTL_SECONDS", "120"))
     _STALE_TTL = int(os.environ.get("TAKEN_PLAYERS_STALE_CACHE_TTL_SECONDS", "900"))
+    _LEASE_TTL = int(os.environ.get("TAKEN_PLAYERS_REFRESH_LEASE_SECONDS", str(max(_TIMEOUT * 4, 60))))
     try:
         position = request.args.get("position", "")
         normalized_position = str(position or "").upper()
@@ -2949,36 +3001,47 @@ def api_taken_players():
             return jsonify(cached)
 
         stale = _dashboard_cache_get(cache_key, _STALE_TTL)
-        lock = _singleflight_lock(cache_key)
+        entry = _singleflight_entry(cache_key, _LEASE_TTL)
+        lock = entry["lock"]
         if not lock.acquire(blocking=False):
             if stale is not None:
                 return jsonify(stale)
-            fallback = {"players": [], "position": position or None, "count": 0, "degraded": True}
-            return jsonify(fallback)
+            return jsonify(_taken_players_fallback(position))
+        _mark_singleflight_started(cache_key, lock)
 
         cached = _dashboard_cache_get(cache_key, _FRESH_TTL)
         if cached is not None:
-            lock.release()
+            _release_singleflight(cache_key, lock)
             return jsonify(cached)
 
         args = [position] if position else []
-        pool = ThreadPoolExecutor(max_workers=1)
+        worker_started = False
         try:
-            future = pool.submit(yahoo_fantasy.cmd_taken_players, args, True)
-            done, _ = wait([future], timeout=_TIMEOUT)
-            if not done:
+            done_event = threading.Event()
+            result_holder = {}
+            worker = threading.Thread(
+                target=_refresh_taken_players_async,
+                args=(cache_key, args, lock, done_event, result_holder),
+                daemon=True,
+            )
+            worker.start()
+            worker_started = True
+            if not done_event.wait(timeout=_TIMEOUT):
                 if stale is not None:
                     return jsonify(stale)
-                fallback = {"players": [], "position": position or None, "count": 0, "degraded": True}
-                return jsonify(fallback)
+                return jsonify(_taken_players_fallback(position))
 
-            result = future.result()
-            if isinstance(result, dict) and "players" in result:
-                _dashboard_cache_set(cache_key, result)
+            error = result_holder.get("error")
+            if error is not None:
+                if stale is not None:
+                    return jsonify(stale)
+                raise error
+            result = result_holder.get("result")
             return jsonify(result)
-        finally:
-            pool.shutdown(wait=False)
-            lock.release()
+        except Exception:
+            if not worker_started:
+                _release_singleflight(cache_key, lock)
+            raise
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
