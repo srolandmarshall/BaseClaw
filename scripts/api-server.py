@@ -199,6 +199,23 @@ def _refresh_taken_players_async(cache_key, args, lock, done_event, result_holde
         lock.release()
 
 
+def _taken_players_fallback(position):
+    return {"players": [], "position": position or None, "count": 0, "degraded": True}
+
+
+def _refresh_taken_players_async(cache_key, args, lock, done_event, result_holder):
+    try:
+        result = yahoo_fantasy.cmd_taken_players(args, as_json=True)
+        result_holder["result"] = result
+        if isinstance(result, dict) and "players" in result:
+            _dashboard_cache_set(cache_key, result)
+    except Exception as exc:
+        result_holder["error"] = exc
+    finally:
+        done_event.set()
+        lock.release()
+
+
 def _invalidate_team_state_caches():
     for prefix in (
         "roster",

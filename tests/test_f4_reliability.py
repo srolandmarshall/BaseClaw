@@ -2084,7 +2084,6 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
         self.assertEqual(payload["players"][0]["name"], "Recovered")
         self.assertEqual(calls["count"], 1)
-
     def test_dashboard_cache_peek_keeps_file_backed_entry_age(self):
         api_module = _load_script(
             "api_server_dashboard_cache_age_for_test",
