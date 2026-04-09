@@ -56,7 +56,7 @@ _DASHBOARD_CACHE_DIR = os.path.join(os.environ.get("DATA_DIR", "/app/data"), "da
 _OPERATOR_SCOREBOARD_TZ = ZoneInfo("America/New_York")
 _MLB_MEDIA_GATEWAY_URL = "https://media-gateway.mlb.com/graphql"
 _team_state_singleflight_guard = threading.Lock()
-_TEAM_STATE_SINGLEFLIGHT_LOCKS = {}
+_TEAM_STATE_SINGLEFLIGHT = {}
 
 
 def _dashboard_cache_file(key):
@@ -119,13 +119,46 @@ def _dashboard_cache_delete_prefix(prefix):
         pass
 
 
-def _singleflight_lock(key):
+def _singleflight_entry(key, lease_seconds):
+    now = time.time()
     with _team_state_singleflight_guard:
-        lock = _TEAM_STATE_SINGLEFLIGHT_LOCKS.get(key)
+        entry = _TEAM_STATE_SINGLEFLIGHT.get(key)
+        if entry is None:
+            entry = {"lock": threading.Lock(), "started_at": 0.0}
+            _TEAM_STATE_SINGLEFLIGHT[key] = entry
+            return entry
+
+        lock = entry.get("lock")
+        started_at = float(entry.get("started_at", 0.0) or 0.0)
         if lock is None:
-            lock = threading.Lock()
-            _TEAM_STATE_SINGLEFLIGHT_LOCKS[key] = lock
-        return lock
+            entry = {"lock": threading.Lock(), "started_at": 0.0}
+            _TEAM_STATE_SINGLEFLIGHT[key] = entry
+            return entry
+
+        if lock.locked() and started_at and now - started_at > lease_seconds:
+            entry = {"lock": threading.Lock(), "started_at": 0.0}
+            _TEAM_STATE_SINGLEFLIGHT[key] = entry
+            return entry
+
+        if not lock.locked():
+            entry["started_at"] = 0.0
+        return entry
+
+
+def _mark_singleflight_started(key, lock):
+    with _team_state_singleflight_guard:
+        entry = _TEAM_STATE_SINGLEFLIGHT.get(key)
+        if entry and entry.get("lock") is lock:
+            entry["started_at"] = time.time()
+
+
+def _release_singleflight(key, lock):
+    with _team_state_singleflight_guard:
+        entry = _TEAM_STATE_SINGLEFLIGHT.get(key)
+        if entry and entry.get("lock") is lock:
+            entry["started_at"] = 0.0
+    if lock.locked():
+        lock.release()
 
 
 def _taken_players_fallback(position):
@@ -142,7 +175,7 @@ def _refresh_taken_players_async(cache_key, args, lock, done_event, result_holde
         result_holder["error"] = exc
     finally:
         done_event.set()
-        lock.release()
+        _release_singleflight(cache_key, lock)
 
 
 def _invalidate_team_state_caches():
@@ -2958,6 +2991,7 @@ def api_taken_players():
     _TIMEOUT = int(os.environ.get("TAKEN_PLAYERS_TIMEOUT_SECONDS", "15"))
     _FRESH_TTL = int(os.environ.get("TAKEN_PLAYERS_CACHE_TTL_SECONDS", "120"))
     _STALE_TTL = int(os.environ.get("TAKEN_PLAYERS_STALE_CACHE_TTL_SECONDS", "900"))
+    _LEASE_TTL = int(os.environ.get("TAKEN_PLAYERS_REFRESH_LEASE_SECONDS", str(max(_TIMEOUT * 4, 60))))
     try:
         position = request.args.get("position", "")
         normalized_position = str(position or "").upper()
@@ -2967,15 +3001,17 @@ def api_taken_players():
             return jsonify(cached)
 
         stale = _dashboard_cache_get(cache_key, _STALE_TTL)
-        lock = _singleflight_lock(cache_key)
+        entry = _singleflight_entry(cache_key, _LEASE_TTL)
+        lock = entry["lock"]
         if not lock.acquire(blocking=False):
             if stale is not None:
                 return jsonify(stale)
             return jsonify(_taken_players_fallback(position))
+        _mark_singleflight_started(cache_key, lock)
 
         cached = _dashboard_cache_get(cache_key, _FRESH_TTL)
         if cached is not None:
-            lock.release()
+            _release_singleflight(cache_key, lock)
             return jsonify(cached)
 
         args = [position] if position else []
@@ -3004,7 +3040,7 @@ def api_taken_players():
             return jsonify(result)
         except Exception:
             if not worker_started:
-                lock.release()
+                _release_singleflight(cache_key, lock)
             raise
     except Exception as e:
         return jsonify({"error": str(e)}), 500
