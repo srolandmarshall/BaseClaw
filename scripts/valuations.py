@@ -15,6 +15,14 @@ import pandas as pd
 import numpy as np
 from mlb_id_cache import get_mlb_id
 from shared import enrich_with_intel
+try:
+    from shared import mlb_fetch as shared_mlb_fetch
+except ImportError:
+    shared_mlb_fetch = None
+try:
+    from shared import TEAM_ALIASES as SHARED_TEAM_ALIASES
+except ImportError:
+    SHARED_TEAM_ALIASES = {}
 from trace_utils import log_trace_event, monotonic_ms
 
 DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
@@ -386,6 +394,73 @@ _live_stats_cache = {
     "bat": {"data": None, "time": 0.0, "status": "empty"},
     "pit": {"data": None, "time": 0.0, "status": "empty"},
 }
+_mlb_team_abbr_cache = {"lookup": None, "time": 0.0}
+
+
+def _mlb_team_abbr_lookup():
+    cached = _mlb_team_abbr_cache.get("lookup")
+    now = time.time()
+    if cached and now - float(_mlb_team_abbr_cache.get("time", 0.0) or 0.0) <= 3600:
+        return cached
+    if shared_mlb_fetch is None:
+        return {}
+
+    lookup = {}
+    payload = shared_mlb_fetch("/teams?sportId=1")
+    for team in payload.get("teams", []) if isinstance(payload, dict) else []:
+        abbr = str(team.get("abbreviation", "") or "").strip().upper()
+        if not abbr:
+            continue
+        team_id = str(team.get("id", "") or "").strip()
+        team_name = str(team.get("name", "") or "").strip().lower()
+        if team_id:
+            lookup[team_id] = abbr
+        if team_name:
+            lookup[team_name] = abbr
+
+    _mlb_team_abbr_cache["lookup"] = lookup
+    _mlb_team_abbr_cache["time"] = now
+    return lookup
+
+
+def _canonical_team_abbr(team_abbr):
+    raw = str(team_abbr or "").strip().upper()
+    if not raw:
+        return ""
+    full_name = SHARED_TEAM_ALIASES.get(raw, raw)
+    reverse_aliases = {
+        "Arizona Diamondbacks": "ARI",
+        "Atlanta Braves": "ATL",
+        "Baltimore Orioles": "BAL",
+        "Boston Red Sox": "BOS",
+        "Chicago Cubs": "CHC",
+        "Chicago White Sox": "CWS",
+        "Cincinnati Reds": "CIN",
+        "Cleveland Guardians": "CLE",
+        "Colorado Rockies": "COL",
+        "Detroit Tigers": "DET",
+        "Houston Astros": "HOU",
+        "Kansas City Royals": "KC",
+        "Los Angeles Angels": "LAA",
+        "Los Angeles Dodgers": "LAD",
+        "Miami Marlins": "MIA",
+        "Milwaukee Brewers": "MIL",
+        "Minnesota Twins": "MIN",
+        "New York Mets": "NYM",
+        "New York Yankees": "NYY",
+        "Oakland Athletics": "OAK",
+        "Philadelphia Phillies": "PHI",
+        "Pittsburgh Pirates": "PIT",
+        "San Diego Padres": "SD",
+        "San Francisco Giants": "SF",
+        "Seattle Mariners": "SEA",
+        "St. Louis Cardinals": "STL",
+        "Tampa Bay Rays": "TB",
+        "Texas Rangers": "TEX",
+        "Toronto Blue Jays": "TOR",
+        "Washington Nationals": "WSH",
+    }
+    return reverse_aliases.get(str(full_name), raw)
 
 def load_league_categories(lg=None):
     """Load scoring categories from Yahoo API, falling back to defaults"""
@@ -694,8 +769,9 @@ def compute_pitcher_zscores(df):
     return _compute_pitcher_zscores_with_threshold(df, MIN_IP)
 
 
-def _compute_pitcher_zscores_with_threshold(df, min_ip):
+def _compute_pitcher_zscores_with_threshold(df, min_ip, pos_bonus_fn=None):
     """Compute pitcher z-scores with a caller-provided IP threshold."""
+    pos_bonus_fn = pos_bonus_fn or get_pos_bonus
     mask = df["IP"] >= min_ip
     working = df[mask].copy()
     if len(working) == 0:
@@ -733,7 +809,7 @@ def _compute_pitcher_zscores_with_threshold(df, min_ip):
     working["Z_Total"] = working[z_cols].sum(axis=1)
 
     # Positional scarcity
-    working["Z_PosAdj"] = working["Pos"].apply(get_pos_bonus)
+    working["Z_PosAdj"] = working["Pos"].apply(pos_bonus_fn)
     working["Z_Final"] = working["Z_Total"] + working["Z_PosAdj"]
 
     return working
@@ -850,6 +926,14 @@ def get_pos_bonus(pos_str):
         if pos in pos_str:
             best = max(best, bonus)
     return best
+
+
+def _get_live_pitcher_pos_bonus(pos_str):
+    """Live pitcher boards should not get reliever scarcity inflation."""
+    pos = str(pos_str or "").strip().upper()
+    if pos in {"RP", "P"}:
+        return 0
+    return get_pos_bonus(pos_str)
 
 
 # --- Player Tier System ---
@@ -1124,6 +1208,128 @@ def _normalize_live_stats_frame(df):
     return None
 
 
+def _ip_to_float(value):
+    """Convert MLB innings-pitched notation like '6.1' into 6.333..."""
+    raw = str(value or "").strip()
+    if not raw:
+        return 0.0
+    if "." not in raw:
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return 0.0
+    whole, outs = raw.split(".", 1)
+    try:
+        base = float(whole)
+    except (TypeError, ValueError):
+        return 0.0
+    if outs == "1":
+        return base + (1.0 / 3.0)
+    if outs == "2":
+        return base + (2.0 / 3.0)
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return base
+
+
+def _normalize_mlb_rate(value):
+    raw = str(value or "").strip()
+    if not raw or raw == "-.--":
+        return 0.0
+    if raw.startswith("."):
+        raw = "0" + raw
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _mlb_stats_endpoint(stats_type):
+    group = "hitting" if stats_type == "bat" else "pitching"
+    season = str(date.today().year)
+    return (
+        "/stats?stats=season&group="
+        + group
+        + "&sportIds=1&playerPool=ALL&season="
+        + season
+        + "&limit=5000"
+    )
+
+
+def _load_live_stats_from_mlb(stats_type):
+    """Load current season stats from the official MLB Stats API."""
+    if shared_mlb_fetch is None:
+        return None
+    team_lookup = _mlb_team_abbr_lookup()
+    payload = shared_mlb_fetch(_mlb_stats_endpoint(stats_type))
+    stats = payload.get("stats", []) if isinstance(payload, dict) else []
+    splits = stats[0].get("splits", []) if stats else []
+    if not splits:
+        return None
+
+    rows = []
+    for split in splits:
+        stat = split.get("stat", {}) or {}
+        player = split.get("player", {}) or {}
+        team = split.get("team", {}) or {}
+        position = split.get("position", {}) or {}
+        team_id = str(team.get("id", "") or "").strip()
+        team_name = str(team.get("name", "") or "").strip()
+        team_abbr = team_lookup.get(team_id, "") or team_lookup.get(team_name.lower(), "") or team_name
+        team_abbr = _canonical_team_abbr(team_abbr)
+
+        if stats_type == "bat":
+            rows.append({
+                "Name": player.get("fullName", ""),
+                "Team": team_abbr,
+                "Pos": position.get("abbreviation", ""),
+                "PA": stat.get("plateAppearances", 0),
+                "AB": stat.get("atBats", 0),
+                "H": stat.get("hits", 0),
+                "HR": stat.get("homeRuns", 0),
+                "R": stat.get("runs", 0),
+                "RBI": stat.get("rbi", 0),
+                "SB": stat.get("stolenBases", 0),
+                "CS": stat.get("caughtStealing", 0),
+                "BB": stat.get("baseOnBalls", 0),
+                "SO": stat.get("strikeOuts", 0),
+                "AVG": _normalize_mlb_rate(stat.get("avg", 0)),
+                "OBP": _normalize_mlb_rate(stat.get("obp", 0)),
+                "SLG": _normalize_mlb_rate(stat.get("slg", 0)),
+                "2B": stat.get("doubles", 0),
+                "3B": stat.get("triples", 0),
+                "mlb_id": player.get("id"),
+            })
+            continue
+
+        games_started = stat.get("gamesStarted", 0)
+        games_played = stat.get("gamesPlayed", 0)
+        rows.append({
+            "Name": player.get("fullName", ""),
+            "Team": team_abbr,
+            "Pos": "SP" if float(games_started or 0) >= 1 else "RP",
+            "IP": _ip_to_float(stat.get("inningsPitched", 0)),
+            "W": stat.get("wins", 0),
+            "L": stat.get("losses", 0),
+            "ERA": _normalize_mlb_rate(stat.get("era", 0)),
+            "WHIP": _normalize_mlb_rate(stat.get("whip", 0)),
+            "K": stat.get("strikeOuts", 0),
+            "BB": stat.get("baseOnBalls", 0),
+            "SV": stat.get("saves", 0),
+            "HLD": stat.get("holds", 0),
+            "GS": games_started,
+            "G": games_played,
+            "ER": stat.get("earnedRuns", 0),
+            "QS": stat.get("qualityStarts", 0),
+            "mlb_id": player.get("id"),
+        })
+
+    if not rows:
+        return None
+    return _normalize_live_stats_frame(pd.DataFrame(rows))
+
+
 def _cached_live_stats(stats_type):
     now = time.time()
     with _live_stats_lock:
@@ -1156,6 +1362,11 @@ def _load_live_stats_frame(stats_type):
 
     current_year = date.today().year
     try:
+        official = _load_live_stats_from_mlb(stats_type)
+        if official is not None and len(official) > 0:
+            _store_live_stats_cache(stats_type, official, "ok")
+            return official
+
         from pybaseball import batting_stats, pitching_stats
 
         fetcher = batting_stats if stats_type == "bat" else pitching_stats
@@ -1217,17 +1428,7 @@ def load_live_stats(stats_type="both"):
 
 def _live_weight_for_date(today=None):
     """Return the current-season weight for live stats in live rankings."""
-    today = today or date.today()
-    month = int(today.month)
-    if month <= 4:
-        return 0.45
-    if month == 5:
-        return 0.55
-    if month == 6:
-        return 0.65
-    if month == 7:
-        return 0.72
-    return 0.8
+    return 0.75
 
 
 def _build_live_rankings_from_lookups(proj_lookup, live_lookup, pos_type, count, live_weight):
@@ -1324,7 +1525,7 @@ def _compute_live_scored_frames(pos_type):
     live_scored = None
     if live_pitchers is not None and len(live_pitchers) > 0:
         live_scored = _compute_pitcher_zscores_with_threshold(
-            derive_pitcher_stats(live_pitchers), 8
+            derive_pitcher_stats(live_pitchers), 8, pos_bonus_fn=_get_live_pitcher_pos_bonus
         )
     return proj_scored, live_scored
 
