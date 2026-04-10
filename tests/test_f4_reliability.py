@@ -512,12 +512,8 @@ class ReliabilityHardeningTests(unittest.TestCase):
             {
                 "pandas": _pandas_stub(),
                 "numpy": _numpy_stub(),
-                "mlb_id_cache": types.SimpleNamespace(
-                    get_mlb_id=lambda *_args, **_kwargs: ""
-                ),
-                "shared": types.SimpleNamespace(
-                    enrich_with_intel=lambda *_args, **_kwargs: None
-                ),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "shared": types.SimpleNamespace(enrich_with_intel=lambda *_args, **_kwargs: None),
                 "trace_utils": _trace_utils_stub(),
             },
         )
@@ -532,12 +528,8 @@ class ReliabilityHardeningTests(unittest.TestCase):
         valuations_module._PROJECTION_FAILURE_TTL = 999
 
         with patch("builtins.print"):
-            first = valuations_module.fetch_fangraphs_projections(
-                "bat", proj_type="steamer"
-            )
-            second = valuations_module.fetch_fangraphs_projections(
-                "bat", proj_type="steamer"
-            )
+            first = valuations_module.fetch_fangraphs_projections("bat", proj_type="steamer")
+            second = valuations_module.fetch_fangraphs_projections("bat", proj_type="steamer")
 
         self.assertIsNone(first)
         self.assertIsNone(second)
