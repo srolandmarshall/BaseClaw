@@ -451,6 +451,36 @@ class ReliabilityHardeningTests(unittest.TestCase):
             else:
                 sys.modules["pybaseball"] = saved_pybaseball
 
+    def test_projection_fetch_failures_are_negative_cached(self):
+        valuations_module = _load_script(
+            "valuations_projection_fetch_negative_cache_for_test",
+            "valuations.py",
+            {
+                "pandas": _pandas_stub(),
+                "numpy": _numpy_stub(),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "shared": types.SimpleNamespace(enrich_with_intel=lambda *_args, **_kwargs: None),
+                "trace_utils": _trace_utils_stub(),
+            },
+        )
+
+        calls = {"count": 0}
+
+        def fake_urlopen(*_args, **_kwargs):
+            calls["count"] += 1
+            raise RuntimeError("upstream 403")
+
+        valuations_module.urllib.request.urlopen = fake_urlopen
+        valuations_module._PROJECTION_FAILURE_TTL = 999
+
+        with patch("builtins.print"):
+            first = valuations_module.fetch_fangraphs_projections("bat", proj_type="steamer")
+            second = valuations_module.fetch_fangraphs_projections("bat", proj_type="steamer")
+
+        self.assertIsNone(first)
+        self.assertIsNone(second)
+        self.assertEqual(calls["count"], 1)
+
     def test_live_stats_prefers_official_mlb_feed_before_pybaseball(self):
         valuations_module = _load_script(
             "valuations_live_stats_official_feed_for_test",
