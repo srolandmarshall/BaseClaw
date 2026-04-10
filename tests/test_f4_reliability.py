@@ -1963,14 +1963,12 @@ class ReliabilityHardeningTests(unittest.TestCase):
         stale_payload = {"players": [{"name": "Cached"}], "position": None, "count": 1}
         api_module.os.environ["TAKEN_PLAYERS_TIMEOUT_SECONDS"] = "0"
         api_module.request.args = {}
-        api_module._DASHBOARD_CACHE = {
-            ("taken-players", ""): (stale_payload, time.time() - 180)
-        }
+        api_module._DASHBOARD_CACHE = {("taken-players", ""): (stale_payload, time.time() - 180)}
         payload = api_module.api_taken_players()
 
         self.assertEqual(payload, stale_payload)
         self.assertTrue(started.wait(timeout=1.0))
-        lock = api_module._TEAM_STATE_SINGLEFLIGHT_LOCKS[("taken-players", "")]
+        lock = api_module._TEAM_STATE_SINGLEFLIGHT[("taken-players", "")]["lock"]
         self.assertTrue(lock.locked())
 
         second = api_module.api_taken_players()
@@ -2025,7 +2023,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
         api_module._DASHBOARD_CACHE = {cache_key: (stale_payload, time.time() - 180)}
         held_lock = threading.Lock()
         held_lock.acquire()
-        api_module._TEAM_STATE_SINGLEFLIGHT_LOCKS = {cache_key: held_lock}
+        api_module._TEAM_STATE_SINGLEFLIGHT = {
+            cache_key: {"lock": held_lock, "started_at": time.time()}
+        }
 
         try:
             payload = api_module.api_taken_players()
@@ -2034,6 +2034,56 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
         self.assertEqual(payload, stale_payload)
         self.assertEqual(called["count"], 0)
+
+    def test_taken_players_evicts_overlong_inflight_refresh_lease(self):
+        yahoo_module = _module("yahoo-fantasy")
+        calls = {"count": 0}
+
+        def _fresh_fetch(*_args, **_kwargs):
+            calls["count"] += 1
+            return {"players": [{"name": "Recovered"}], "position": None, "count": 1}
+
+        yahoo_module.cmd_taken_players = _fresh_fetch
+
+        api_module = _load_script(
+            "api_server_taken_players_lease_eviction_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": yahoo_module,
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": _module("intel"),
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+            },
+        )
+
+        stale_payload = {"players": [{"name": "Cached"}], "position": None, "count": 1}
+        cache_key = ("taken-players", "")
+        held_lock = threading.Lock()
+        held_lock.acquire()
+        api_module.request.args = {}
+        api_module._DASHBOARD_CACHE = {cache_key: (stale_payload, time.time() - 180)}
+        api_module.os.environ["TAKEN_PLAYERS_TIMEOUT_SECONDS"] = "5"
+        api_module.os.environ["TAKEN_PLAYERS_REFRESH_LEASE_SECONDS"] = "1"
+        api_module._TEAM_STATE_SINGLEFLIGHT = {
+            cache_key: {"lock": held_lock, "started_at": time.time() - 10}
+        }
+
+        payload = api_module.api_taken_players()
+
+        self.assertEqual(payload["players"][0]["name"], "Recovered")
+        self.assertEqual(calls["count"], 1)
 
     def test_dashboard_cache_peek_keeps_file_backed_entry_age(self):
         api_module = _load_script(
@@ -2055,9 +2105,7 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(
-                    get_mlb_id=lambda *_args, **_kwargs: None
-                ),
+                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
             },
         )
 
@@ -2066,9 +2114,7 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_path = pathlib.Path(tmpdir) / "taken-players.json"
-            cache_path.write_text(
-                json.dumps({"players": [{"name": "Cached"}], "count": 1})
-            )
+            cache_path.write_text(json.dumps({"players": [{"name": "Cached"}], "count": 1}))
             stale_age = time.time() - 1000
             api_module.os.utime(cache_path, (stale_age, stale_age))
             api_module._dashboard_cache_file = lambda _key: str(cache_path)
