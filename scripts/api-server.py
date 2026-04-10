@@ -52,7 +52,9 @@ import draft_sim
 
 app = Flask(__name__)
 _DASHBOARD_CACHE = {}
-_DASHBOARD_CACHE_DIR = os.path.join(os.environ.get("DATA_DIR", "/app/data"), "dashboard-cache")
+_DASHBOARD_CACHE_DIR = os.path.join(
+    os.environ.get("DATA_DIR", "/app/data"), "dashboard-cache"
+)
 _OPERATOR_SCOREBOARD_TZ = ZoneInfo("America/New_York")
 _MLB_MEDIA_GATEWAY_URL = "https://media-gateway.mlb.com/graphql"
 _team_state_singleflight_guard = threading.Lock()
@@ -61,7 +63,9 @@ _TEAM_STATE_SINGLEFLIGHT_LOCKS = {}
 
 def _dashboard_cache_file(key):
     prefix = str(key[0] if isinstance(key, tuple) and key else key).replace("/", "_")
-    digest = hashlib.sha1(json.dumps(key, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:16]
+    digest = hashlib.sha1(
+        json.dumps(key, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()[:16]
     return os.path.join(_DASHBOARD_CACHE_DIR, prefix + "-" + digest + ".json")
 
 
@@ -250,8 +254,22 @@ def _auth_status_payload():
     oauth_file = str(getattr(shared, "OAUTH_FILE", "") or "")
     read_oauth_file = getattr(shared, "_read_oauth_file", None)
     oauth_has_tokens = getattr(shared, "_oauth_has_tokens", None)
-    bridge_url = str(getattr(shared, "YAHOO_OAUTH_BRIDGE_URL", os.environ.get("YAHOO_OAUTH_BRIDGE_URL", "")) or "")
-    bridge_token = str(getattr(shared, "YAHOO_OAUTH_BRIDGE_TOKEN", os.environ.get("YAHOO_OAUTH_BRIDGE_TOKEN", "")) or "")
+    bridge_url = str(
+        getattr(
+            shared,
+            "YAHOO_OAUTH_BRIDGE_URL",
+            os.environ.get("YAHOO_OAUTH_BRIDGE_URL", ""),
+        )
+        or ""
+    )
+    bridge_token = str(
+        getattr(
+            shared,
+            "YAHOO_OAUTH_BRIDGE_TOKEN",
+            os.environ.get("YAHOO_OAUTH_BRIDGE_TOKEN", ""),
+        )
+        or ""
+    )
 
     oauth_payload = {}
     if callable(read_oauth_file):
@@ -358,14 +376,7 @@ def _score_hot_bat(player):
     if hits + homers + runs + rbi + steals <= 0:
         return None
 
-    score = (
-        hits
-        + homers * 4.0
-        + runs * 1.5
-        + rbi * 1.5
-        + steals * 3.0
-        + avg * 5.0
-    )
+    score = hits + homers * 4.0 + runs * 1.5 + rbi * 1.5 + steals * 3.0 + avg * 5.0
     summary_parts = [_format_number(hits) + " H"]
     if homers > 0:
         summary_parts.append(_format_number(homers) + " HR")
@@ -399,7 +410,9 @@ def _score_hot_hand(player):
     strikeouts = sum(_recent_stat(g, "strikeOuts", "strikeouts") for g in recent)
     saves = sum(_recent_stat(g, "saves", "save") for g in recent)
     holds = sum(_recent_stat(g, "holds", "hold") for g in recent)
-    clean_appearances = sum(1 for g in recent if _recent_stat(g, "earnedRuns", "earned_runs") == 0)
+    clean_appearances = sum(
+        1 for g in recent if _recent_stat(g, "earnedRuns", "earned_runs") == 0
+    )
 
     score = (
         strikeouts * 2.5
@@ -434,7 +447,9 @@ def _candidate_free_agents(pos_type, count):
             available_players = yahoo_fantasy.get_available_players(pos_type, pool_size)
         else:
             _, _, league = yahoo_fantasy.get_league()
-            available_players = league.free_agents(pos_type)[:pool_size] if league else []
+            available_players = (
+                league.free_agents(pos_type)[:pool_size] if league else []
+            )
     except Exception:
         return []
 
@@ -443,17 +458,30 @@ def _candidate_free_agents(pos_type, count):
         if not isinstance(player, dict):
             continue
         name = str(player.get("name", "Unknown"))
-        team_abbr = str(player.get("team_abbr") or player.get("team") or player.get("editorial_team_abbr") or "").strip().upper()
-        candidates.append({
-            "name": name,
-            "player_id": str(player.get("player_id", "")),
-            "team": team_abbr,
-            "team_abbr": team_abbr,
-            "positions": _normalize_positions(player.get("positions", player.get("eligible_positions", []))),
-            "percent_owned": _safe_int(player.get("percent_owned"), 0) or 0,
-            "mlb_id": player.get("mlb_id") or get_mlb_id(name),
-            "availability_type": str(player.get("availability_type", "")),
-        })
+        team_abbr = (
+            str(
+                player.get("team_abbr")
+                or player.get("team")
+                or player.get("editorial_team_abbr")
+                or ""
+            )
+            .strip()
+            .upper()
+        )
+        candidates.append(
+            {
+                "name": name,
+                "player_id": str(player.get("player_id", "")),
+                "team": team_abbr,
+                "team_abbr": team_abbr,
+                "positions": _normalize_positions(
+                    player.get("positions", player.get("eligible_positions", []))
+                ),
+                "percent_owned": _safe_int(player.get("percent_owned"), 0) or 0,
+                "mlb_id": player.get("mlb_id") or get_mlb_id(name),
+                "availability_type": str(player.get("availability_type", "")),
+            }
+        )
     return candidates
 
 
@@ -486,7 +514,12 @@ def _is_inactive_fantasy_position(position):
 
 
 def _operator_generated_at():
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return (
+        datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def _operator_inning_display(game):
@@ -496,8 +529,14 @@ def _operator_inning_display(game):
     linescore = game.get("linescore", {}) if isinstance(game, dict) else {}
 
     if abstract == "Live":
-        half = str(linescore.get("inningHalf", "") or linescore.get("inningState", "") or "").strip()
-        inning = linescore.get("currentInningOrdinal") or linescore.get("currentInning") or ""
+        half = str(
+            linescore.get("inningHalf", "") or linescore.get("inningState", "") or ""
+        ).strip()
+        inning = (
+            linescore.get("currentInningOrdinal")
+            or linescore.get("currentInning")
+            or ""
+        )
         if half and inning:
             return str(half) + " " + str(inning)
         if inning:
@@ -544,7 +583,15 @@ def _operator_normalize_inning_half(value):
 
 def _operator_status_sort_bucket(status):
     token = str(status or "").strip().lower()
-    if token in {"in progress", "manager challenge", "review", "warmup", "delayed start", "delayed", "game advisory"}:
+    if token in {
+        "in progress",
+        "manager challenge",
+        "review",
+        "warmup",
+        "delayed start",
+        "delayed",
+        "game advisory",
+    }:
         return 0
     if token in {"pre-game", "scheduled"}:
         return 1
@@ -566,7 +613,9 @@ def _operator_sort_games(games):
 
 
 def _operator_iter_schedule_games(schedule_data):
-    for date_block in schedule_data.get("dates", []) if isinstance(schedule_data, dict) else []:
+    for date_block in (
+        schedule_data.get("dates", []) if isinstance(schedule_data, dict) else []
+    ):
         for game in date_block.get("games", []) if isinstance(date_block, dict) else []:
             if isinstance(game, dict):
                 yield game
@@ -601,11 +650,23 @@ def _operator_live_state(game, away_abbr, home_abbr):
     balls = _safe_int(linescore.get("balls"), None)
     strikes = _safe_int(linescore.get("strikes"), None)
 
-    offense = linescore.get("offense", {}) if isinstance(linescore.get("offense"), dict) else {}
-    defense = linescore.get("defense", {}) if isinstance(linescore.get("defense"), dict) else {}
+    offense = (
+        linescore.get("offense", {})
+        if isinstance(linescore.get("offense"), dict)
+        else {}
+    )
+    defense = (
+        linescore.get("defense", {})
+        if isinstance(linescore.get("defense"), dict)
+        else {}
+    )
 
-    batter = offense.get("batter", {}) if isinstance(offense.get("batter"), dict) else {}
-    pitcher = defense.get("pitcher", {}) if isinstance(defense.get("pitcher"), dict) else {}
+    batter = (
+        offense.get("batter", {}) if isinstance(offense.get("batter"), dict) else {}
+    )
+    pitcher = (
+        defense.get("pitcher", {}) if isinstance(defense.get("pitcher"), dict) else {}
+    )
 
     if inning_half == "Top":
         batter_team_abbr = away_abbr
@@ -626,11 +687,13 @@ def _operator_live_state(game, away_abbr, home_abbr):
         batter_team_abbr = ""
         pitcher_team_abbr = ""
 
-    has_live_markers = any(
-        value is not None and value != ""
-        for value in (inning_half, inning_number, outs, balls, strikes)
-    ) or any(key in offense for key in ("first", "second", "third", "batter")) or any(
-        key in defense for key in ("pitcher",)
+    has_live_markers = (
+        any(
+            value is not None and value != ""
+            for value in (inning_half, inning_number, outs, balls, strikes)
+        )
+        or any(key in offense for key in ("first", "second", "third", "batter"))
+        or any(key in defense for key in ("pitcher",))
     )
 
     if abstract != "live" and not has_live_markers:
@@ -677,8 +740,16 @@ def _operator_normalize_game(
     away_name = str(away_team.get("name", "") or "")
     home_name = str(home_team.get("name", "") or "")
 
-    away_abbr = str(away_team.get("abbreviation", "") or "") or abbr_lookup.get(str(away_id), "") or abbr_lookup.get(away_name.lower(), "")
-    home_abbr = str(home_team.get("abbreviation", "") or "") or abbr_lookup.get(str(home_id), "") or abbr_lookup.get(home_name.lower(), "")
+    away_abbr = (
+        str(away_team.get("abbreviation", "") or "")
+        or abbr_lookup.get(str(away_id), "")
+        or abbr_lookup.get(away_name.lower(), "")
+    )
+    home_abbr = (
+        str(home_team.get("abbreviation", "") or "")
+        or abbr_lookup.get(str(home_id), "")
+        or abbr_lookup.get(home_name.lower(), "")
+    )
 
     normalized = {
         "game_id": "mlb-" + str(game.get("gamePk", "")),
@@ -715,7 +786,11 @@ def _operator_normalize_game(
 
 def _operator_extract_current_matchup(lg):
     raw = lg.matchups()
-    league_data = raw.get("fantasy_content", {}).get("league", []) if isinstance(raw, dict) else []
+    league_data = (
+        raw.get("fantasy_content", {}).get("league", [])
+        if isinstance(raw, dict)
+        else []
+    )
     if len(league_data) < 2:
         return None
 
@@ -762,7 +837,11 @@ def _operator_roster_rows(team_obj):
             {
                 "name": yahoo_fantasy._player_name(player),
                 "team_abbr": str(yahoo_fantasy._player_team_abbr(player) or "").upper(),
-                "slot_status": "inactive" if _is_inactive_fantasy_position(fantasy_position) else "active",
+                "slot_status": (
+                    "inactive"
+                    if _is_inactive_fantasy_position(fantasy_position)
+                    else "active"
+                ),
                 "fantasy_position": fantasy_position,
                 "mlb_id": get_mlb_id(yahoo_fantasy._player_name(player)),
             }
@@ -784,7 +863,9 @@ def _operator_fill_missing_team_abbr(rows, mlb_fetch, abbr_lookup):
 
     unique_ids = list(dict.fromkeys(missing_ids))
     try:
-        data = mlb_fetch("/people?personIds=" + ",".join(unique_ids) + "&hydrate=currentTeam")
+        data = mlb_fetch(
+            "/people?personIds=" + ",".join(unique_ids) + "&hydrate=currentTeam"
+        )
     except Exception:
         return
 
@@ -794,10 +875,9 @@ def _operator_fill_missing_team_abbr(rows, mlb_fetch, abbr_lookup):
         current_team = person.get("currentTeam", {}) if isinstance(person, dict) else {}
         team_id = current_team.get("id")
         team_name = str(current_team.get("name", "") or "")
-        current_team_by_id[person_id] = (
-            abbr_lookup.get(str(team_id), "")
-            or abbr_lookup.get(team_name.lower(), "")
-        )
+        current_team_by_id[person_id] = abbr_lookup.get(
+            str(team_id), ""
+        ) or abbr_lookup.get(team_name.lower(), "")
 
     for row in rows:
         if row.get("team_abbr"):
@@ -884,7 +964,11 @@ def _mlb_media_links_for_game(game_pk, game_date):
     if cached is not None:
         return cached
 
-    result = {"watch_url": "https://www.mlb.com/tv/g" + str(game_pk), "watch_links": [], "audio_links": []}
+    result = {
+        "watch_url": "https://www.mlb.com/tv/g" + str(game_pk),
+        "watch_links": [],
+        "audio_links": [],
+    }
     try:
         game_media = _mlb_media_links_query(game_pk, game_date)
     except Exception:
@@ -893,11 +977,18 @@ def _mlb_media_links_for_game(game_pk, game_date):
 
     audio_links = []
     watch_links = []
-    for feed in sorted(game_media.get("content", []) if isinstance(game_media, dict) else [], key=_mlb_media_feed_sort_key):
+    for feed in sorted(
+        game_media.get("content", []) if isinstance(game_media, dict) else [],
+        key=_mlb_media_feed_sort_key,
+    ):
         if not isinstance(feed, dict):
             continue
-        media_id = str(feed.get("mediaId", "") or feed.get("contentId", "") or "").strip()
-        media_type = str((feed.get("mediaState", {}) or {}).get("mediaType", "") or "").upper()
+        media_id = str(
+            feed.get("mediaId", "") or feed.get("contentId", "") or ""
+        ).strip()
+        media_type = str(
+            (feed.get("mediaState", {}) or {}).get("mediaType", "") or ""
+        ).upper()
         if not media_id:
             continue
         if media_type == "AUDIO":
@@ -959,7 +1050,9 @@ def _operator_scoreboard_context(scoreboard_date):
     from shared import mlb_fetch
 
     scoreboard_date_str = scoreboard_date.isoformat()
-    schedule_data = mlb_fetch("/schedule?sportId=1&date=" + scoreboard_date_str + "&hydrate=linescore,team")
+    schedule_data = mlb_fetch(
+        "/schedule?sportId=1&date=" + scoreboard_date_str + "&hydrate=linescore,team"
+    )
     abbr_lookup = _operator_team_abbr_map(mlb_fetch)
 
     my_rows = []
@@ -974,7 +1067,9 @@ def _operator_scoreboard_context(scoreboard_date):
             my_team_name = str(matchup.get("my_team_name", "") or "")
             opponent_team_name = str(matchup.get("opp_team_name", "") or "")
             my_rows = _operator_roster_rows(lg.to_team(matchup.get("my_team_key", "")))
-            opp_rows = _operator_roster_rows(lg.to_team(matchup.get("opp_team_key", "")))
+            opp_rows = _operator_roster_rows(
+                lg.to_team(matchup.get("opp_team_key", ""))
+            )
             _operator_fill_missing_team_abbr(my_rows, mlb_fetch, abbr_lookup)
             _operator_fill_missing_team_abbr(opp_rows, mlb_fetch, abbr_lookup)
     except Exception:
@@ -992,20 +1087,34 @@ def _operator_scoreboard_context(scoreboard_date):
     }
 
 
-def _operator_attach_relevance(normalized, my_by_team, opp_by_team, include_players=True, scoreboard_date=""):
+def _operator_attach_relevance(
+    normalized, my_by_team, opp_by_team, include_players=True, scoreboard_date=""
+):
     away_abbr = str(normalized.get("away_team", {}).get("abbr", "") or "").upper()
     home_abbr = str(normalized.get("home_team", {}).get("abbr", "") or "").upper()
-    my_players = list(my_by_team.get(away_abbr, [])) + list(my_by_team.get(home_abbr, []))
-    opp_players = list(opp_by_team.get(away_abbr, [])) + list(opp_by_team.get(home_abbr, []))
+    my_players = list(my_by_team.get(away_abbr, [])) + list(
+        my_by_team.get(home_abbr, [])
+    )
+    opp_players = list(opp_by_team.get(away_abbr, [])) + list(
+        opp_by_team.get(home_abbr, [])
+    )
 
     if include_players:
         normalized["my_players"] = my_players
         normalized["opp_players"] = opp_players
 
-    normalized["my_active_count"] = sum(1 for p in my_players if p.get("slot_status") == "active")
-    normalized["my_inactive_count"] = sum(1 for p in my_players if p.get("slot_status") != "active")
-    normalized["opp_active_count"] = sum(1 for p in opp_players if p.get("slot_status") == "active")
-    normalized["opp_inactive_count"] = sum(1 for p in opp_players if p.get("slot_status") != "active")
+    normalized["my_active_count"] = sum(
+        1 for p in my_players if p.get("slot_status") == "active"
+    )
+    normalized["my_inactive_count"] = sum(
+        1 for p in my_players if p.get("slot_status") != "active"
+    )
+    normalized["opp_active_count"] = sum(
+        1 for p in opp_players if p.get("slot_status") == "active"
+    )
+    normalized["opp_inactive_count"] = sum(
+        1 for p in opp_players if p.get("slot_status") != "active"
+    )
     normalized["total_relevant_count"] = len(my_players) + len(opp_players)
     game_pk = _operator_game_pk_from_game_id(normalized.get("game_id"))
     if game_pk:
@@ -1105,13 +1214,23 @@ def _operator_scoreboard_payload(scoreboard_date):
             )
         )
 
-    return {"date": context["date"], "generated_at": _operator_generated_at(), "games": _operator_sort_games(games)}
+    return {
+        "date": context["date"],
+        "generated_at": _operator_generated_at(),
+        "games": _operator_sort_games(games),
+    }
 
 
 def _mlb_stat_group_from_player_info(player_info):
     position_name = str((player_info or {}).get("position", "") or "").strip().lower()
     throws = str((player_info or {}).get("throws", "") or "").strip().upper()
-    if "pitch" in position_name or position_name in {"p", "sp", "rp", "starter", "reliever"}:
+    if "pitch" in position_name or position_name in {
+        "p",
+        "sp",
+        "rp",
+        "starter",
+        "reliever",
+    }:
         return "pitching"
     if throws in {"R", "L", "S"} and position_name in {"pitcher"}:
         return "pitching"
@@ -1122,7 +1241,9 @@ def _latest_game_log_entry(games, requested_date=""):
     if not isinstance(games, list) or not games:
         return None, False
 
-    filtered = [g for g in games if isinstance(g, dict) and str(g.get("date", "") or "")]
+    filtered = [
+        g for g in games if isinstance(g, dict) and str(g.get("date", "") or "")
+    ]
     if not filtered:
         return None, False
 
@@ -1140,7 +1261,12 @@ def _mlb_latest_outing_summary(stat_group, entry):
 
     if stat_group == "pitching":
         parts = [
-            str(entry.get("inningsPitched", "") or entry.get("innings_pitched", "") or "0.0") + " IP",
+            str(
+                entry.get("inningsPitched", "")
+                or entry.get("innings_pitched", "")
+                or "0.0"
+            )
+            + " IP",
             str(_safe_int(entry.get("earnedRuns"), 0) or 0) + " ER",
             str(_safe_int(entry.get("strikeOuts"), 0) or 0) + " K",
         ]
@@ -1185,7 +1311,9 @@ def _mlb_latest_outing_payload(player_name="", player_id="", requested_date=""):
 
     stat_group = _mlb_stat_group_from_player_info(player_info)
     games = intel._fetch_mlb_game_log(resolved_player_id, stat_group, 14)
-    latest_entry, matched_requested_date = _latest_game_log_entry(games, requested_date=requested_date)
+    latest_entry, matched_requested_date = _latest_game_log_entry(
+        games, requested_date=requested_date
+    )
     if latest_entry is None:
         return {
             "player_name": player_info.get("name", resolved_player_name),
@@ -1200,11 +1328,18 @@ def _mlb_latest_outing_payload(player_name="", player_id="", requested_date=""):
     outing = {
         "date": str(latest_entry.get("date", "") or ""),
         "opponent": str(latest_entry.get("opponent", "") or ""),
-        "summary": str(latest_entry.get("summary", "") or _mlb_latest_outing_summary(stat_group, latest_entry)),
+        "summary": str(
+            latest_entry.get("summary", "")
+            or _mlb_latest_outing_summary(stat_group, latest_entry)
+        ),
     }
 
     if stat_group == "pitching":
-        outing["innings_pitched"] = str(latest_entry.get("inningsPitched", "") or latest_entry.get("innings_pitched", "") or "")
+        outing["innings_pitched"] = str(
+            latest_entry.get("inningsPitched", "")
+            or latest_entry.get("innings_pitched", "")
+            or ""
+        )
         outing["hits"] = _safe_int(latest_entry.get("hits"), 0) or 0
         outing["runs"] = _safe_int(latest_entry.get("runs"), 0) or 0
         outing["earned_runs"] = _safe_int(latest_entry.get("earnedRuns"), 0) or 0
@@ -1242,7 +1377,10 @@ def _fantasy_matchup_record(matchup, team1_key, team2_key):
     stat_winners = matchup.get("stat_winners", []) if isinstance(matchup, dict) else []
     for item in stat_winners if isinstance(stat_winners, list) else []:
         winner = item.get("stat_winner", {}) if isinstance(item, dict) else {}
-        if str(winner.get("is_tied", "") or "").lower() in {"1", "true", "yes"} or winner.get("is_tied") is True:
+        if (
+            str(winner.get("is_tied", "") or "").lower() in {"1", "true", "yes"}
+            or winner.get("is_tied") is True
+        ):
             ties += 1
             continue
         winner_team_key = str(winner.get("winner_team_key", "") or "")
@@ -1260,7 +1398,11 @@ def _fantasy_scoreboard_summary_payload():
     except Exception:
         return {"week": "", "my_matchup_summary": {}, "league_matchups": []}
 
-    league_data = raw.get("fantasy_content", {}).get("league", []) if isinstance(raw, dict) else []
+    league_data = (
+        raw.get("fantasy_content", {}).get("league", [])
+        if isinstance(raw, dict)
+        else []
+    )
     if len(league_data) < 2:
         return {"week": "", "my_matchup_summary": {}, "league_matchups": []}
 
@@ -1274,7 +1416,9 @@ def _fantasy_scoreboard_summary_payload():
     for i in range(count):
         matchup = matchup_block.get(str(i), {}).get("matchup", {})
         matchup_root = matchup.get("0", {}) if isinstance(matchup, dict) else {}
-        teams_data = matchup_root.get("teams", {}) if isinstance(matchup_root, dict) else {}
+        teams_data = (
+            matchup_root.get("teams", {}) if isinstance(matchup_root, dict) else {}
+        )
         team1 = teams_data.get("0", {}) if isinstance(teams_data, dict) else {}
         team2 = teams_data.get("1", {}) if isinstance(teams_data, dict) else {}
         team1_name = yahoo_fantasy._extract_team_name(team1)
@@ -1292,7 +1436,10 @@ def _fantasy_scoreboard_summary_payload():
             }
         )
 
-        if yahoo_fantasy.TEAM_ID not in team1_key and yahoo_fantasy.TEAM_ID not in team2_key:
+        if (
+            yahoo_fantasy.TEAM_ID not in team1_key
+            and yahoo_fantasy.TEAM_ID not in team2_key
+        ):
             continue
 
         if yahoo_fantasy.TEAM_ID in team1_key:
@@ -1373,7 +1520,9 @@ def _emit_request_completion(status_code, error=None):
 
     if request.path == "/api/rankings":
         stage_ms = dict(getattr(g, "_rankings_stage_ms", {}) or {})
-        known_ms = sum(stage_ms.get(k, 0) for k in ("arg_parse", "cmd_rankings", "serialization"))
+        known_ms = sum(
+            stage_ms.get(k, 0) for k in ("arg_parse", "cmd_rankings", "serialization")
+        )
         response_write_ms = max(duration_ms - known_ms, 0)
         stage_ms["response_write"] = response_write_ms
         rankings_status = "ok" if int(status) < 400 else "error"
@@ -1482,6 +1631,7 @@ _heartbeat_thread.start()
 
 # --- Optional startup projection warmup ---
 
+
 def _startup_projections():
     """Background warmup for projections/rankings.
 
@@ -1489,6 +1639,7 @@ def _startup_projections():
     cold boot makes operational API routes too slow for Fly auto-start traffic.
     """
     import time
+
     time.sleep(5)  # Let other startup tasks settle
     try:
         valuations.ensure_projections()
@@ -1500,29 +1651,74 @@ def _startup_projections():
     # 1. Warm bare (no intel) pool — large count, fast, covers full draft pool
     try:
         draft_count = str(int(os.environ.get("DRAFT_POOL_COUNT", "250")))
-        print("Warming bare rankings cache (count=" + draft_count + ", enrich=False)...")
+        print(
+            "Warming bare rankings cache (count=" + draft_count + ", enrich=False)..."
+        )
         b_bare = valuations.cmd_rankings(["B", draft_count], as_json=True, enrich=False)
         p_bare = valuations.cmd_rankings(["P", draft_count], as_json=True, enrich=False)
         _set_cached_rankings("B", draft_count, False, [], b_bare, enrich=False)
         _set_cached_rankings("P", draft_count, False, [], p_bare, enrich=False)
-        print("Bare rankings cached (" + str(len(b_bare.get("players", []))) + "B / " + str(len(p_bare.get("players", []))) + "P)")
+        print(
+            "Bare rankings cached ("
+            + str(len(b_bare.get("players", [])))
+            + "B / "
+            + str(len(p_bare.get("players", [])))
+            + "P)"
+        )
     except Exception as e:
         print("Bare rankings warmup failed: " + str(e))
 
     # 2. Warm enriched pool — smaller count, includes statcast intel
     try:
-        print("Warming enriched rankings cache (count=" + str(_RANKINGS_WARMUP_COUNT) + ", enrich=True)...")
-        b_result = valuations.cmd_rankings(["B", str(_RANKINGS_WARMUP_COUNT)], as_json=True, enrich=True)
-        p_result = valuations.cmd_rankings(["P", str(_RANKINGS_WARMUP_COUNT)], as_json=True, enrich=True)
-        from position_batching import normalize_hitter_payload, ranking_position_tokens, grouped_all_payload
-        b_norm = normalize_hitter_payload(b_result, "players", _RANKINGS_WARMUP_POSITIONS, True, ranking_position_tokens)
+        print(
+            "Warming enriched rankings cache (count="
+            + str(_RANKINGS_WARMUP_COUNT)
+            + ", enrich=True)..."
+        )
+        b_result = valuations.cmd_rankings(
+            ["B", str(_RANKINGS_WARMUP_COUNT)], as_json=True, enrich=True
+        )
+        p_result = valuations.cmd_rankings(
+            ["P", str(_RANKINGS_WARMUP_COUNT)], as_json=True, enrich=True
+        )
+        from position_batching import (
+            normalize_hitter_payload,
+            ranking_position_tokens,
+            grouped_all_payload,
+        )
+
+        b_norm = normalize_hitter_payload(
+            b_result,
+            "players",
+            _RANKINGS_WARMUP_POSITIONS,
+            True,
+            ranking_position_tokens,
+        )
         all_result = grouped_all_payload(b_norm, p_result)
-        _set_cached_rankings("ALL", _RANKINGS_WARMUP_COUNT, True, _RANKINGS_WARMUP_POSITIONS, all_result, enrich=True)
-        _set_cached_rankings("B", _RANKINGS_WARMUP_COUNT, False, [], b_result, enrich=True)
-        _set_cached_rankings("P", _RANKINGS_WARMUP_COUNT, False, [], p_result, enrich=True)
-        print("Enriched rankings cached (" + str(len(b_result.get("players", []))) + "B / " + str(len(p_result.get("players", []))) + "P)")
+        _set_cached_rankings(
+            "ALL",
+            _RANKINGS_WARMUP_COUNT,
+            True,
+            _RANKINGS_WARMUP_POSITIONS,
+            all_result,
+            enrich=True,
+        )
+        _set_cached_rankings(
+            "B", _RANKINGS_WARMUP_COUNT, False, [], b_result, enrich=True
+        )
+        _set_cached_rankings(
+            "P", _RANKINGS_WARMUP_COUNT, False, [], p_result, enrich=True
+        )
+        print(
+            "Enriched rankings cached ("
+            + str(len(b_result.get("players", [])))
+            + "B / "
+            + str(len(p_result.get("players", [])))
+            + "P)"
+        )
     except Exception as e:
         print("Enriched rankings warmup failed: " + str(e))
+
 
 def _maybe_start_projection_warmup():
     raw = str(os.environ.get("ENABLE_STARTUP_WARMUP", "") or "").strip().lower()
@@ -1542,16 +1738,28 @@ _proj_thread = _maybe_start_projection_warmup()
 
 # --- Rankings response cache ---
 
-_RANKINGS_CACHE_TTL = int(os.environ.get("RANKINGS_CACHE_TTL_SECONDS", "600"))  # 10 min default
+_RANKINGS_CACHE_TTL = int(
+    os.environ.get("RANKINGS_CACHE_TTL_SECONDS", "600")
+)  # 10 min default
 _RANKINGS_WARMUP_COUNT = int(os.environ.get("RANKINGS_WARMUP_COUNT", "150"))
 _RANKINGS_WARMUP_POSITIONS = ["C", "1B", "2B", "3B", "SS", "OF", "UTIL"]
-_rankings_cache = {}          # (variant, pos_type, group_by_position, positions, enrich) -> (expires_at, count, result_dict)
+_rankings_cache = (
+    {}
+)  # (variant, pos_type, group_by_position, positions, enrich) -> (expires_at, count, result_dict)
 _rankings_cache_lock = threading.Lock()
 
 
-def _rankings_base_key(pos_type, group_by_position, positions, enrich=True, variant="default"):
+def _rankings_base_key(
+    pos_type, group_by_position, positions, enrich=True, variant="default"
+):
     """Cache key — separate buckets for enriched vs bare rankings."""
-    return (variant, pos_type, bool(group_by_position), tuple(sorted(positions or [])), bool(enrich))
+    return (
+        variant,
+        pos_type,
+        bool(group_by_position),
+        tuple(sorted(positions or [])),
+        bool(enrich),
+    )
 
 
 def _slice_rankings_result(result, requested_count):
@@ -1570,8 +1778,11 @@ def _slice_rankings_result(result, requested_count):
     return r
 
 
-def _get_cached_rankings(pos_type, count, group_by_position, positions, enrich=True, variant="default"):
+def _get_cached_rankings(
+    pos_type, count, group_by_position, positions, enrich=True, variant="default"
+):
     import time
+
     key = _rankings_base_key(pos_type, group_by_position, positions, enrich, variant)
     with _rankings_cache_lock:
         entry = _rankings_cache.get(key)
@@ -1611,17 +1822,33 @@ def _rankings_result_has_players(result):
     return False
 
 
-def _set_cached_rankings(pos_type, count, group_by_position, positions, result, enrich=True, variant="default"):
+def _set_cached_rankings(
+    pos_type,
+    count,
+    group_by_position,
+    positions,
+    result,
+    enrich=True,
+    variant="default",
+):
     import time
+
     if not _rankings_result_has_players(result):
         return
     key = _rankings_base_key(pos_type, group_by_position, positions, enrich, variant)
     with _rankings_cache_lock:
         existing = _rankings_cache.get(key)
         # Only overwrite if new result has more players (or cache is empty/expired)
-        if existing is None or time.monotonic() >= existing[0] or int(count) >= existing[1]:
-            _rankings_cache[key] = (time.monotonic() + _RANKINGS_CACHE_TTL, int(count), result)
-
+        if (
+            existing is None
+            or time.monotonic() >= existing[0]
+            or int(count) >= existing[1]
+        ):
+            _rankings_cache[key] = (
+                time.monotonic() + _RANKINGS_CACHE_TTL,
+                int(count),
+                result,
+            )
 
 
 # --- Health check ---
@@ -1639,10 +1866,12 @@ def api_endpoints():
     for rule in sorted(app.url_map.iter_rules(), key=lambda r: r.rule):
         if rule.rule.startswith("/api/"):
             methods = sorted(rule.methods - {"OPTIONS", "HEAD"})
-            endpoints.append({
-                "path": rule.rule,
-                "methods": methods,
-            })
+            endpoints.append(
+                {
+                    "path": rule.rule,
+                    "methods": methods,
+                }
+            )
     return jsonify({"endpoints": endpoints})
 
 
@@ -1778,7 +2007,12 @@ def api_info():
 @app.route("/api/league-context")
 def api_league_context():
     try:
-        from shared import get_league_settings, get_league_context, normalize_team_details
+        from shared import (
+            get_league_settings,
+            get_league_context,
+            normalize_team_details,
+        )
+
         settings = get_league_settings()
         result = {
             "waiver_type": settings.get("waiver_type", "unknown"),
@@ -1798,7 +2032,10 @@ def api_league_context():
                 if fb is not None:
                     result["faab_balance"] = fb
             except Exception as e:
-                print("Warning: could not fetch FAAB balance for league-context: " + str(e))
+                print(
+                    "Warning: could not fetch FAAB balance for league-context: "
+                    + str(e)
+                )
         return jsonify(result)
     except Exception as e:
         return _json_error(e, status=500)
@@ -1912,7 +2149,8 @@ def api_operator_scoreboard():
         if requested_game_id:
             filtered = dict(cached)
             filtered["games"] = [
-                game for game in (cached.get("games") or [])
+                game
+                for game in (cached.get("games") or [])
                 if str(game.get("game_id", "") or "") == requested_game_id
             ]
             return jsonify(filtered)
@@ -1923,7 +2161,8 @@ def api_operator_scoreboard():
         if requested_game_id:
             filtered = dict(result)
             filtered["games"] = [
-                game for game in (result.get("games") or [])
+                game
+                for game in (result.get("games") or [])
                 if str(game.get("game_id", "") or "") == requested_game_id
             ]
             return jsonify(filtered)
@@ -1976,7 +2215,11 @@ def api_operator_scoreboard_game():
     except ValueError as e:
         return _json_error(e, status=400)
 
-    cache_key = ("operator-scoreboard-game", scoreboard_date.isoformat(), requested_game_id)
+    cache_key = (
+        "operator-scoreboard-game",
+        scoreboard_date.isoformat(),
+        requested_game_id,
+    )
     cached = _dashboard_cache_get(cache_key, 30)
     if cached is not None:
         return jsonify(cached)
@@ -2089,8 +2332,12 @@ def api_best_available():
 
         def _fetch_best_available():
             if pos_type == "ALL":
-                hitters = draft_assistant.cmd_best_available(["B", count, include_intel], as_json=True)
-                pitchers = draft_assistant.cmd_best_available(["P", count, include_intel], as_json=True)
+                hitters = draft_assistant.cmd_best_available(
+                    ["B", count, include_intel], as_json=True
+                )
+                pitchers = draft_assistant.cmd_best_available(
+                    ["P", count, include_intel], as_json=True
+                )
                 hitters = _normalize_hitter_payload(
                     hitters,
                     "players",
@@ -2100,7 +2347,9 @@ def api_best_available():
                 )
                 return _grouped_all_payload(hitters, pitchers)
             else:
-                result = draft_assistant.cmd_best_available([pos_type, count, include_intel], as_json=True)
+                result = draft_assistant.cmd_best_available(
+                    [pos_type, count, include_intel], as_json=True
+                )
                 if pos_type == "B":
                     result = _normalize_hitter_payload(
                         result,
@@ -2118,7 +2367,11 @@ def api_best_available():
             if not done:
                 empty_b = {"pos_type": "B", "players": []}
                 empty_p = {"pos_type": "P", "players": []}
-                fallback = _grouped_all_payload(empty_b, empty_p) if pos_type == "ALL" else {"pos_type": pos_type, "players": []}
+                fallback = (
+                    _grouped_all_payload(empty_b, empty_p)
+                    if pos_type == "ALL"
+                    else {"pos_type": pos_type, "players": []}
+                )
                 return jsonify(fallback)
             result = future.result()
             _dashboard_cache_set(cache_key, result)
@@ -2136,6 +2389,7 @@ def api_best_available():
 
 
 # --- Draft Sim (draft_sim.py) ---
+
 
 @app.route("/api/draft-sim")
 def api_draft_sim():
@@ -2157,7 +2411,10 @@ def api_draft_sim():
         seed = int(request.args.get("seed", 42))
 
         if not (1 <= draft_position <= num_teams):
-            return jsonify({"error": "draft_position must be between 1 and num_teams"}), 400
+            return (
+                jsonify({"error": "draft_position must be between 1 and num_teams"}),
+                400,
+            )
 
         # Use the pre-warmed bare rankings pool (enrich=False, count=250+)
         draft_count = str(int(os.environ.get("DRAFT_POOL_COUNT", "250")))
@@ -2166,9 +2423,13 @@ def api_draft_sim():
 
         # Fall back to live fetch if cache is cold
         if b_cached is None:
-            b_cached = valuations.cmd_rankings(["B", draft_count], as_json=True, enrich=False)
+            b_cached = valuations.cmd_rankings(
+                ["B", draft_count], as_json=True, enrich=False
+            )
         if p_cached is None:
-            p_cached = valuations.cmd_rankings(["P", draft_count], as_json=True, enrich=False)
+            p_cached = valuations.cmd_rankings(
+                ["P", draft_count], as_json=True, enrich=False
+            )
 
         batters = b_cached.get("players", []) if isinstance(b_cached, dict) else []
         pitchers = p_cached.get("players", []) if isinstance(p_cached, dict) else []
@@ -2230,15 +2491,28 @@ def api_rankings():
         )
         update_trace_context(pos_type=pos_type, count=_safe_int(count, None))
 
-        cached = _get_cached_rankings(pos_type, count, group_by_position, positions, enrich)
+        cached = _get_cached_rankings(
+            pos_type, count, group_by_position, positions, enrich
+        )
         if cached is not None:
-            log_trace_event(event="rankings_cache_hit", stage="api_rankings", duration_ms=0, cache_hit=True, status="ok", gate="rankings")
+            log_trace_event(
+                event="rankings_cache_hit",
+                stage="api_rankings",
+                duration_ms=0,
+                cache_hit=True,
+                status="ok",
+                gate="rankings",
+            )
             return jsonify(cached)
 
         if pos_type == "ALL":
             with ThreadPoolExecutor(max_workers=2) as pool:
-                hitters_future = pool.submit(valuations.cmd_rankings, ["B", count], True, enrich)
-                pitchers_future = pool.submit(valuations.cmd_rankings, ["P", count], True, enrich)
+                hitters_future = pool.submit(
+                    valuations.cmd_rankings, ["B", count], True, enrich
+                )
+                pitchers_future = pool.submit(
+                    valuations.cmd_rankings, ["P", count], True, enrich
+                )
                 hitters = hitters_future.result()
                 pitchers = pitchers_future.result()
             hitters = _normalize_hitter_payload(
@@ -2252,7 +2526,9 @@ def api_rankings():
         else:
             result = _timed_stage(
                 "cmd_rankings",
-                lambda: valuations.cmd_rankings([pos_type, count], as_json=True, enrich=enrich),
+                lambda: valuations.cmd_rankings(
+                    [pos_type, count], as_json=True, enrich=enrich
+                ),
             )
             if pos_type == "B":
                 result = _normalize_hitter_payload(
@@ -2264,7 +2540,9 @@ def api_rankings():
                 )
 
         response = _timed_stage("serialization", lambda: jsonify(result))
-        _set_cached_rankings(pos_type, count, group_by_position, positions, result, enrich)
+        _set_cached_rankings(
+            pos_type, count, group_by_position, positions, result, enrich
+        )
         return response
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
@@ -2279,19 +2557,27 @@ def api_rankings_live():
         count = request.args.get("count", "25")
         enrich = _safe_bool(request.args.get("enrich", "true"))
 
-        cached = _get_cached_rankings(pos_type, count, False, [], enrich, variant="live")
+        cached = _get_cached_rankings(
+            pos_type, count, False, [], enrich, variant="live"
+        )
         if cached is not None:
             return jsonify(cached)
 
         if pos_type == "ALL":
             with ThreadPoolExecutor(max_workers=2) as pool:
-                hitters_future = pool.submit(valuations.cmd_rankings_live, ["B", count], True, enrich)
-                pitchers_future = pool.submit(valuations.cmd_rankings_live, ["P", count], True, enrich)
+                hitters_future = pool.submit(
+                    valuations.cmd_rankings_live, ["B", count], True, enrich
+                )
+                pitchers_future = pool.submit(
+                    valuations.cmd_rankings_live, ["P", count], True, enrich
+                )
                 hitters = hitters_future.result()
                 pitchers = pitchers_future.result()
             result = _grouped_all_payload(hitters, pitchers)
         else:
-            result = valuations.cmd_rankings_live([pos_type, count], as_json=True, enrich=enrich)
+            result = valuations.cmd_rankings_live(
+                [pos_type, count], as_json=True, enrich=enrich
+            )
 
         _set_cached_rankings(pos_type, count, False, [], result, enrich, variant="live")
         return jsonify(result)
@@ -2358,11 +2644,15 @@ def api_projection_disagreements():
         if pos_type == "ALL":
             hitters = {
                 "pos_type": "B",
-                "disagreements": valuations.compute_projection_disagreements(stats_type="bat", count=count),
+                "disagreements": valuations.compute_projection_disagreements(
+                    stats_type="bat", count=count
+                ),
             }
             pitchers = {
                 "pos_type": "P",
-                "disagreements": valuations.compute_projection_disagreements(stats_type="pit", count=count),
+                "disagreements": valuations.compute_projection_disagreements(
+                    stats_type="pit", count=count
+                ),
             }
             hitters = _normalize_hitter_payload(
                 hitters,
@@ -2376,7 +2666,9 @@ def api_projection_disagreements():
         stats_type = "bat" if pos_type == "B" else "pit"
         result = {
             "pos_type": pos_type,
-            "disagreements": valuations.compute_projection_disagreements(stats_type=stats_type, count=count),
+            "disagreements": valuations.compute_projection_disagreements(
+                stats_type=stats_type, count=count
+            ),
         }
         if pos_type == "B":
             result = _normalize_hitter_payload(
@@ -2425,13 +2717,19 @@ def api_lineup_optimize():
         apply_flag = request.args.get("apply", "false")
         include_intel = _safe_bool(request.args.get("include_intel", "false"))
         if apply_flag.lower() != "true":
-            cache_key = ("lineup-optimize", date.today().isoformat(), bool(include_intel))
+            cache_key = (
+                "lineup-optimize",
+                date.today().isoformat(),
+                bool(include_intel),
+            )
             cached = _dashboard_cache_get(cache_key, 60)
             if cached is not None:
                 return jsonify(cached)
         if apply_flag.lower() == "true":
             args.append("--apply")
-        result = season_manager.cmd_lineup_optimize(args, as_json=True, include_intel=include_intel)
+        result = season_manager.cmd_lineup_optimize(
+            args, as_json=True, include_intel=include_intel
+        )
         if apply_flag.lower() == "true":
             _dashboard_cache_delete_prefix("lineup-optimize")
         else:
@@ -2569,11 +2867,14 @@ def api_propose_trade():
         their_player_ids = data.get("their_player_ids", "")
         note = data.get("note", "")
         if not their_team_key or not your_player_ids or not their_player_ids:
-            return jsonify(
-                {
-                    "error": "Missing their_team_key, your_player_ids, or their_player_ids"
-                }
-            ), 400
+            return (
+                jsonify(
+                    {
+                        "error": "Missing their_team_key, your_player_ids, or their_player_ids"
+                    }
+                ),
+                400,
+            )
         args = [their_team_key, your_player_ids, their_player_ids]
         if note:
             args.append(note)
@@ -2705,7 +3006,12 @@ def api_percent_owned():
     try:
         ids = request.args.get("ids", "")
         if not ids:
-            return jsonify({"error": "Missing ids parameter (comma-separated player IDs)"}), 400
+            return (
+                jsonify(
+                    {"error": "Missing ids parameter (comma-separated player IDs)"}
+                ),
+                400,
+            )
         args = [pid.strip() for pid in ids.split(",") if pid.strip()]
         result = yahoo_fantasy.cmd_percent_owned(args, as_json=True)
         return jsonify(result)
@@ -3093,7 +3399,9 @@ def api_mlb_latest_outing():
                 date.fromisoformat(requested_date)
             except ValueError as e:
                 return _json_error("Invalid date. Expected YYYY-MM-DD.", status=400)
-        result = _mlb_latest_outing_payload(player_name=player_name, player_id=player_id, requested_date=requested_date)
+        result = _mlb_latest_outing_payload(
+            player_name=player_name, player_id=player_id, requested_date=requested_date
+        )
         return jsonify(result)
     except ValueError as e:
         return _json_error(e, status=400)
@@ -3283,7 +3591,10 @@ def api_intel_player():
     try:
         name = request.args.get("name", "")
         if not name:
-            return jsonify({"error": "Missing name parameter"}), 400
+            name = request.args.get("player_name", "")
+        name = str(name).strip()
+        if not name:
+            return jsonify({"error": "Missing name or player_name parameter"}), 400
         result = intel.cmd_player_report([name], as_json=True)
         return jsonify(result)
     except Exception as e:
@@ -3391,7 +3702,9 @@ def _safe_call(fn, args=None):
 def _safe_lineup_preview(include_intel=False):
     """Request a lightweight lineup preview for workflow aggregates by default."""
     try:
-        return season_manager.cmd_lineup_optimize([], as_json=True, include_intel=include_intel)
+        return season_manager.cmd_lineup_optimize(
+            [], as_json=True, include_intel=include_intel
+        )
     except Exception as e:
         return {"_error": str(e)}
 
@@ -3399,7 +3712,9 @@ def _safe_lineup_preview(include_intel=False):
 def _safe_injury_report(include_intel=False):
     """Request a lightweight injury payload for workflow aggregates by default."""
     try:
-        return season_manager.cmd_injury_report([], as_json=True, include_intel=include_intel)
+        return season_manager.cmd_injury_report(
+            [], as_json=True, include_intel=include_intel
+        )
     except Exception as e:
         return {"_error": str(e)}
 
@@ -3407,7 +3722,9 @@ def _safe_injury_report(include_intel=False):
 def _safe_waiver_analyze(pos_type, count, include_intel=False):
     """Request waiver recommendations without heavy intel/trend enrichment when possible."""
     try:
-        return season_manager.cmd_waiver_analyze([pos_type, str(count)], as_json=True, include_intel=include_intel)
+        return season_manager.cmd_waiver_analyze(
+            [pos_type, str(count)], as_json=True, include_intel=include_intel
+        )
     except Exception as e:
         return {"_error": str(e)}
 
@@ -3423,7 +3740,9 @@ def _safe_roster(include_intel=False):
 def _safe_whats_new(include_intel=False):
     """Request a lightweight digest payload for workflow aggregates by default."""
     try:
-        return season_manager.cmd_whats_new([], as_json=True, include_intel=include_intel)
+        return season_manager.cmd_whats_new(
+            [], as_json=True, include_intel=include_intel
+        )
     except Exception as e:
         return {"_error": str(e)}
 
@@ -3434,13 +3753,17 @@ def _synthesize_morning_actions(injury, lineup, whats_new, waiver_b, waiver_p):
 
     # Critical: injured players in active slots
     for p in (injury or {}).get("injured_active", []):
-        actions.append({
-            "priority": 1,
-            "type": "injury",
-            "message": str(p.get("name", "?")) + " (" + str(p.get("status", ""))
+        actions.append(
+            {
+                "priority": 1,
+                "type": "injury",
+                "message": str(p.get("name", "?"))
+                + " ("
+                + str(p.get("status", ""))
                 + ") injured in active slot - move to IL or bench",
-            "player_id": str(p.get("player_id", "")),
-        })
+                "player_id": str(p.get("player_id", "")),
+            }
+        )
 
     # Lineup: off-day starters or bench with games
     off_day = (lineup or {}).get("active_off_day", [])
@@ -3449,45 +3772,59 @@ def _synthesize_morning_actions(injury, lineup, whats_new, waiver_b, waiver_p):
         msg = str(len(off_day)) + " starter(s) off today"
         if bench_playing:
             msg += ", " + str(len(bench_playing)) + " bench player(s) have games"
-        actions.append({
-            "priority": 2,
-            "type": "lineup",
-            "message": msg + " - run yahoo_auto_lineup",
-        })
+        actions.append(
+            {
+                "priority": 2,
+                "type": "lineup",
+                "message": msg + " - run yahoo_auto_lineup",
+            }
+        )
 
     # Pending trades need attention
     for t in (whats_new or {}).get("pending_trades", []):
-        actions.append({
-            "priority": 2,
-            "type": "trade",
-            "message": "Pending trade from " + str(t.get("trader_team_name", "?"))
+        actions.append(
+            {
+                "priority": 2,
+                "type": "trade",
+                "message": "Pending trade from "
+                + str(t.get("trader_team_name", "?"))
                 + " - review and respond",
-            "transaction_key": str(t.get("transaction_key", "")),
-        })
+                "transaction_key": str(t.get("transaction_key", "")),
+            }
+        )
 
     # Waiver opportunities: top picks
     for label, waiver in [("batter", waiver_b), ("pitcher", waiver_p)]:
         recs = (waiver or {}).get("recommendations", [])
         if recs:
             top = recs[0]
-            actions.append({
-                "priority": 3,
-                "type": "waiver",
-                "message": "Top " + label + " pickup: " + str(top.get("name", "?"))
-                    + " (id:" + str(top.get("pid", "?")) + ") score="
+            actions.append(
+                {
+                    "priority": 3,
+                    "type": "waiver",
+                    "message": "Top "
+                    + label
+                    + " pickup: "
+                    + str(top.get("name", "?"))
+                    + " (id:"
+                    + str(top.get("pid", "?"))
+                    + ") score="
                     + str(top.get("score", "?")),
-                "player_id": str(top.get("pid", "")),
-            })
+                    "player_id": str(top.get("pid", "")),
+                }
+            )
 
     # Healthy players stuck on IL
     for p in (injury or {}).get("healthy_il", []):
-        actions.append({
-            "priority": 3,
-            "type": "il_activation",
-            "message": str(p.get("name", "?"))
+        actions.append(
+            {
+                "priority": 3,
+                "type": "il_activation",
+                "message": str(p.get("name", "?"))
                 + " on IL with no injury status - may be activatable",
-            "player_id": str(p.get("player_id", "")),
-        })
+                "player_id": str(p.get("player_id", "")),
+            }
+        )
 
     actions.sort(key=lambda a: a.get("priority", 99))
     return actions
@@ -3573,33 +3910,41 @@ def _synthesize_roster_issues(injury, lineup, roster, busts):
 
     # Critical: injured in active slots
     for p in (injury or {}).get("injured_active", []):
-        issues.append({
-            "severity": "critical",
-            "type": "injury",
-            "message": str(p.get("name", "?")) + " (" + str(p.get("status", ""))
+        issues.append(
+            {
+                "severity": "critical",
+                "type": "injury",
+                "message": str(p.get("name", "?"))
+                + " ("
+                + str(p.get("status", ""))
                 + ") injured in active slot",
-            "fix": "Move to IL or bench",
-            "player_id": str(p.get("player_id", "")),
-        })
+                "fix": "Move to IL or bench",
+                "player_id": str(p.get("player_id", "")),
+            }
+        )
 
     # Warning: healthy players on IL
     for p in (injury or {}).get("healthy_il", []):
-        issues.append({
-            "severity": "warning",
-            "type": "il_waste",
-            "message": str(p.get("name", "?")) + " on IL with no injury status",
-            "fix": "Activate to free IL slot",
-            "player_id": str(p.get("player_id", "")),
-        })
+        issues.append(
+            {
+                "severity": "warning",
+                "type": "il_waste",
+                "message": str(p.get("name", "?")) + " on IL with no injury status",
+                "fix": "Activate to free IL slot",
+                "player_id": str(p.get("player_id", "")),
+            }
+        )
 
     # Warning: off-day starters
     for p in (lineup or {}).get("active_off_day", []):
-        issues.append({
-            "severity": "warning",
-            "type": "off_day",
-            "message": str(p.get("name", "?")) + " starting but has no game today",
-            "fix": "Bench and start an active player",
-        })
+        issues.append(
+            {
+                "severity": "warning",
+                "type": "off_day",
+                "message": str(p.get("name", "?")) + " starting but has no game today",
+                "fix": "Bench and start an active player",
+            }
+        )
 
     # Info: bust candidates on roster
     roster_names = set()
@@ -3607,13 +3952,15 @@ def _synthesize_roster_issues(injury, lineup, roster, busts):
         roster_names.add(str(p.get("name", "")).lower())
     for b in (busts or {}).get("candidates", []):
         if str(b.get("name", "")).lower() in roster_names:
-            issues.append({
-                "severity": "info",
-                "type": "bust_risk",
-                "message": str(b.get("name", "?"))
+            issues.append(
+                {
+                    "severity": "info",
+                    "type": "bust_risk",
+                    "message": str(b.get("name", "?"))
                     + " is a bust candidate (underperforming Statcast metrics)",
-                "fix": "Consider replacing if better options available",
-            })
+                    "fix": "Consider replacing if better options available",
+                }
+            )
 
     return issues
 
@@ -3661,8 +4008,7 @@ def _synthesize_waiver_pairs(waiver_b, waiver_p):
                 },
                 "pos_type": label,
                 "weak_categories": [
-                    c.get("name", "") for c in
-                    (waiver or {}).get("weak_categories", [])
+                    c.get("name", "") for c in (waiver or {}).get("weak_categories", [])
                 ],
             }
             pairs.append(pair)
@@ -3673,7 +4019,11 @@ def _synthesize_waiver_pairs(waiver_b, waiver_p):
 @app.route("/api/workflow/waiver-recommendations")
 def workflow_waiver_recommendations():
     count = request.args.get("count", "5")
-    cache_key = ("workflow-waiver-recommendations", date.today().isoformat(), str(count))
+    cache_key = (
+        "workflow-waiver-recommendations",
+        date.today().isoformat(),
+        str(count),
+    )
     cached = _dashboard_cache_get(cache_key, 30)
     if cached is not None:
         return jsonify(cached)
@@ -3725,7 +4075,10 @@ def workflow_trade_analysis():
                     p = players[0]
                     give_players.append(p)
                     for rp in roster_players:
-                        if str(rp.get("name", "")).lower() == str(p.get("name", "")).lower():
+                        if (
+                            str(rp.get("name", "")).lower()
+                            == str(p.get("name", "")).lower()
+                        ):
                             give_ids.append(str(rp.get("player_id", "")))
                             break
             except Exception:
@@ -3741,7 +4094,10 @@ def workflow_trade_analysis():
                     # Try search for player ID
                     search = _safe_call(yahoo_fantasy.cmd_search, [name])
                     for rp in (search or {}).get("results", []):
-                        if str(rp.get("name", "")).lower() == str(p.get("name", "")).lower():
+                        if (
+                            str(rp.get("name", "")).lower()
+                            == str(p.get("name", "")).lower()
+                        ):
                             get_ids.append(str(rp.get("player_id", "")))
                             break
             except Exception:
@@ -3766,14 +4122,16 @@ def workflow_trade_analysis():
             except Exception:
                 intel_data[name] = {"_error": "unavailable"}
 
-        return jsonify({
-            "give_players": give_players,
-            "get_players": get_players,
-            "give_ids": give_ids,
-            "get_ids": get_ids,
-            "trade_eval": trade_eval,
-            "intel": intel_data,
-        })
+        return jsonify(
+            {
+                "give_players": give_players,
+                "get_players": get_players,
+                "give_ids": give_ids,
+                "get_ids": get_ids,
+                "trade_eval": trade_eval,
+                "intel": intel_data,
+            }
+        )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -3855,9 +4213,15 @@ def api_news_feed():
         sources = request.args.get("sources", None)
         player = request.args.get("player", None)
         limit = int(request.args.get("limit", "30"))
-        entries = news.fetch_aggregated_news(sources=sources, player=player, limit=limit)
-        source_set = sorted(set(e.get("source", "") for e in entries if e.get("source")))
-        return jsonify({"entries": entries, "sources": source_set, "count": len(entries)})
+        entries = news.fetch_aggregated_news(
+            sources=sources, player=player, limit=limit
+        )
+        source_set = sorted(
+            set(e.get("source", "") for e in entries if e.get("source"))
+        )
+        return jsonify(
+            {"entries": entries, "sources": source_set, "count": len(entries)}
+        )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -3942,6 +4306,7 @@ def api_player_tier():
 def api_cache_stats():
     try:
         from intel import _cache_manager
+
         return jsonify(_cache_manager.stats())
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -3951,6 +4316,7 @@ def api_cache_stats():
 def api_cache_clear():
     try:
         from intel import _cache_manager
+
         data = request.get_json(silent=True) or {}
         key = data.get("key")
         _cache_manager.clear(key)
