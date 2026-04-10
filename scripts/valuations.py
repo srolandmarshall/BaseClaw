@@ -30,6 +30,38 @@ DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
 # FanGraphs projections API
 FANGRAPHS_PROJ_URL = "https://www.fangraphs.com/api/projections"
 PROJ_MAX_AGE = 86400  # 24 hours
+_PROJECTION_FAILURE_TTL = int(os.environ.get("FANGRAPHS_PROJECTION_FAILURE_TTL_SECONDS", "900"))
+_projection_failure_lock = threading.Lock()
+_projection_failure_state = {
+    "global": {"time": 0.0, "error": ""},
+    "keys": {},
+}
+
+
+def _projection_failure_lookup(key):
+    now = time.time()
+    with _projection_failure_lock:
+        global_entry = _projection_failure_state["global"]
+        if global_entry["time"] and now - global_entry["time"] < _PROJECTION_FAILURE_TTL:
+            return global_entry["error"] or "recent FanGraphs projection fetch failure"
+        key_entry = _projection_failure_state["keys"].get(key)
+        if key_entry and now - key_entry["time"] < _PROJECTION_FAILURE_TTL:
+            return key_entry["error"] or "recent FanGraphs projection fetch failure"
+    return ""
+
+
+def _projection_failure_record(key, err):
+    message = str(err or "").strip() or "unknown error"
+    now = time.time()
+    with _projection_failure_lock:
+        _projection_failure_state["global"] = {"time": now, "error": message}
+        _projection_failure_state["keys"][key] = {"time": now, "error": message}
+
+
+def _projection_failure_clear(key):
+    with _projection_failure_lock:
+        _projection_failure_state["keys"].pop(key, None)
+        _projection_failure_state["global"] = {"time": 0.0, "error": ""}
 
 
 def _proj_csv_path(stats_type, proj_type=None):
@@ -74,6 +106,11 @@ def fetch_fangraphs_projections(stats_type, proj_type="steamer"):
         + "&stats=" + stats_type
         + "&pos=all&team=0&players=0"
     )
+    failure_key = proj_type + ":" + stats_type
+    recent_failure = _projection_failure_lookup(failure_key)
+    if recent_failure:
+        print("Warning: FanGraphs projections backoff active for " + failure_key + ": " + recent_failure)
+        return None
     try:
         req = urllib.request.Request(url, headers={
             "User-Agent": "YahooFantasyBot/1.0",
@@ -81,6 +118,7 @@ def fetch_fangraphs_projections(stats_type, proj_type="steamer"):
         })
         with urllib.request.urlopen(req, timeout=30) as response:
             raw = json.loads(response.read().decode())
+        _projection_failure_clear(failure_key)
         if not raw or not isinstance(raw, list):
             print("Warning: FanGraphs projections returned empty for " + stats_type)
             return None
@@ -127,6 +165,7 @@ def fetch_fangraphs_projections(stats_type, proj_type="steamer"):
         df = pd.DataFrame(rows)
         return df
     except Exception as e:
+        _projection_failure_record(failure_key, e)
         print("Warning: FanGraphs projections fetch failed for " + stats_type + ": " + str(e))
         return None
 

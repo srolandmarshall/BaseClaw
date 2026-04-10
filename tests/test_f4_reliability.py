@@ -25,7 +25,9 @@ def _load_script(module_name, filename, stubs):
         saved[name] = sys.modules.get(name)
         sys.modules[name] = module
     try:
-        spec = importlib.util.spec_from_file_location(module_name, SCRIPTS_DIR / filename)
+        spec = importlib.util.spec_from_file_location(
+            module_name, SCRIPTS_DIR / filename
+        )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
@@ -87,7 +89,9 @@ def _position_batching_stub():
     module.normalize_hitter_payload = lambda payload, *args, **kwargs: payload
     module.parse_hitter_positions_csv = lambda *args, **kwargs: []
     module.ranking_position_tokens = lambda *args, **kwargs: []
-    module.safe_bool = lambda value, default=False: default if value is None else bool(value)
+    module.safe_bool = lambda value, default=False: (
+        default if value is None else bool(value)
+    )
     return module
 
 
@@ -117,7 +121,7 @@ def _pandas_stub():
 
 def _numpy_stub():
     module = _module("numpy")
-    module.sqrt = lambda value: value ** 0.5
+    module.sqrt = lambda value: value**0.5
     module.std = lambda values: 0
     module.where = lambda condition, yes, no: yes if condition else no
     return module
@@ -167,20 +171,48 @@ class ReliabilityHardeningTests(unittest.TestCase):
             {
                 "pandas": _pandas_stub(),
                 "numpy": _numpy_stub(),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda name, *_args, **_kwargs: "mlb-" + str(name)),
-                "shared": types.SimpleNamespace(enrich_with_intel=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda name, *_args, **_kwargs: "mlb-" + str(name)
+                ),
+                "shared": types.SimpleNamespace(
+                    enrich_with_intel=lambda *_args, **_kwargs: None
+                ),
                 "trace_utils": _trace_utils_stub(),
             },
         )
 
         players = valuations_module._build_live_rankings_from_lookups(
             {
-                "projection riser": {"name": "Projection Riser", "team": "ATL", "pos": "SP", "z_score": 3.0, "mlb_id": "mlb-1"},
-                "steady bat": {"name": "Steady Bat", "team": "LAD", "pos": "OF", "z_score": 5.0, "mlb_id": "mlb-2"},
+                "projection riser": {
+                    "name": "Projection Riser",
+                    "team": "ATL",
+                    "pos": "SP",
+                    "z_score": 3.0,
+                    "mlb_id": "mlb-1",
+                },
+                "steady bat": {
+                    "name": "Steady Bat",
+                    "team": "LAD",
+                    "pos": "OF",
+                    "z_score": 5.0,
+                    "mlb_id": "mlb-2",
+                },
             },
             {
-                "projection riser": {"name": "Projection Riser", "team": "ATL", "pos": "SP", "z_score": 9.0, "mlb_id": "mlb-1"},
-                "live only": {"name": "Live Only", "team": "MIA", "pos": "SP", "z_score": 8.5, "mlb_id": "mlb-3"},
+                "projection riser": {
+                    "name": "Projection Riser",
+                    "team": "ATL",
+                    "pos": "SP",
+                    "z_score": 9.0,
+                    "mlb_id": "mlb-1",
+                },
+                "live only": {
+                    "name": "Live Only",
+                    "team": "MIA",
+                    "pos": "SP",
+                    "z_score": 8.5,
+                    "mlb_id": "mlb-3",
+                },
             },
             "P",
             3,
@@ -203,7 +235,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
             {
                 "pandas": _pandas_stub(),
                 "numpy": _numpy_stub(),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: ""
+                ),
                 "shared": types.SimpleNamespace(
                     enrich_with_intel=lambda *_args, **_kwargs: None,
                     mlb_fetch=lambda *_args, **_kwargs: {},
@@ -259,7 +293,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
             {
                 "pandas": _pandas_stub(),
                 "numpy": _numpy_stub(),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: ""
+                ),
                 "shared": types.SimpleNamespace(
                     enrich_with_intel=lambda *_args, **_kwargs: None,
                     mlb_fetch=fake_mlb_fetch,
@@ -281,11 +317,16 @@ class ReliabilityHardeningTests(unittest.TestCase):
             {
                 "pandas": _pandas_stub(),
                 "numpy": _numpy_stub(),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: ""
+                ),
                 "shared": types.SimpleNamespace(
                     enrich_with_intel=lambda *_args, **_kwargs: None,
                     mlb_fetch=lambda *_args, **_kwargs: {},
-                    TEAM_ALIASES={"AZ": "Arizona Diamondbacks", "ARI": "Arizona Diamondbacks"},
+                    TEAM_ALIASES={
+                        "AZ": "Arizona Diamondbacks",
+                        "ARI": "Arizona Diamondbacks",
+                    },
                 ),
                 "trace_utils": _trace_utils_stub(),
             },
@@ -337,7 +378,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
             {
                 "pandas": _pandas_stub(),
                 "numpy": _numpy_stub(),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: ""
+                ),
                 "shared": types.SimpleNamespace(
                     enrich_with_intel=lambda *_args, **_kwargs: None,
                     mlb_fetch=fake_mlb_fetch,
@@ -360,7 +403,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
             {
                 "pandas": _pandas_stub(),
                 "numpy": _numpy_stub(),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: ""
+                ),
                 "shared": types.SimpleNamespace(
                     enrich_with_intel=lambda *_args, **_kwargs: None,
                     mlb_fetch=lambda *_args, **_kwargs: {},
@@ -383,9 +428,12 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "pandas": _pandas_stub(),
                 "numpy": _numpy_stub(),
                 "mlb_id_cache": types.SimpleNamespace(
-                    get_mlb_id=lambda name, *_args, **_kwargs: calls.append(name) or ("mlb-" + str(name))
+                    get_mlb_id=lambda name, *_args, **_kwargs: calls.append(name)
+                    or ("mlb-" + str(name))
                 ),
-                "shared": types.SimpleNamespace(enrich_with_intel=lambda *_args, **_kwargs: None),
+                "shared": types.SimpleNamespace(
+                    enrich_with_intel=lambda *_args, **_kwargs: None
+                ),
                 "trace_utils": _trace_utils_stub(),
             },
         )
@@ -400,7 +448,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
         lookup = valuations_module._rows_to_z_lookup(df)
         self.assertEqual(calls, [])
-        players = valuations_module._build_live_rankings_from_lookups(lookup, {}, "P", 2, 0.45)
+        players = valuations_module._build_live_rankings_from_lookups(
+            lookup, {}, "P", 2, 0.45
+        )
         valuations_module._resolve_mlb_ids_for_players(players)
         self.assertEqual([player["name"] for player in players], ["Alpha", "Beta"])
         self.assertEqual(calls, ["Alpha", "Beta"])
@@ -413,8 +463,12 @@ class ReliabilityHardeningTests(unittest.TestCase):
             {
                 "pandas": _pandas_stub(),
                 "numpy": _numpy_stub(),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
-                "shared": types.SimpleNamespace(enrich_with_intel=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: ""
+                ),
+                "shared": types.SimpleNamespace(
+                    enrich_with_intel=lambda *_args, **_kwargs: None
+                ),
                 "trace_utils": _trace_utils_stub(),
             },
         )
@@ -451,6 +505,44 @@ class ReliabilityHardeningTests(unittest.TestCase):
             else:
                 sys.modules["pybaseball"] = saved_pybaseball
 
+    def test_projection_fetch_failures_are_negative_cached(self):
+        valuations_module = _load_script(
+            "valuations_projection_fetch_negative_cache_for_test",
+            "valuations.py",
+            {
+                "pandas": _pandas_stub(),
+                "numpy": _numpy_stub(),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: ""
+                ),
+                "shared": types.SimpleNamespace(
+                    enrich_with_intel=lambda *_args, **_kwargs: None
+                ),
+                "trace_utils": _trace_utils_stub(),
+            },
+        )
+
+        calls = {"count": 0}
+
+        def fake_urlopen(*_args, **_kwargs):
+            calls["count"] += 1
+            raise RuntimeError("upstream 403")
+
+        valuations_module.urllib.request.urlopen = fake_urlopen
+        valuations_module._PROJECTION_FAILURE_TTL = 999
+
+        with patch("builtins.print"):
+            first = valuations_module.fetch_fangraphs_projections(
+                "bat", proj_type="steamer"
+            )
+            second = valuations_module.fetch_fangraphs_projections(
+                "bat", proj_type="steamer"
+            )
+
+        self.assertIsNone(first)
+        self.assertIsNone(second)
+        self.assertEqual(calls["count"], 1)
+
     def test_live_stats_prefers_official_mlb_feed_before_pybaseball(self):
         valuations_module = _load_script(
             "valuations_live_stats_official_feed_for_test",
@@ -458,7 +550,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
             {
                 "pandas": _pandas_stub(),
                 "numpy": _numpy_stub(),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: ""
+                ),
                 "shared": types.SimpleNamespace(
                     enrich_with_intel=lambda *_args, **_kwargs: None,
                     mlb_fetch=lambda *_args, **_kwargs: {},
@@ -476,10 +570,14 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
         pybaseball_mod = _module("pybaseball")
         pybaseball_mod.batting_stats = lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("pybaseball batting_stats should not run when MLB feed succeeds")
+            AssertionError(
+                "pybaseball batting_stats should not run when MLB feed succeeds"
+            )
         )
         pybaseball_mod.pitching_stats = lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("pybaseball pitching_stats should not run when MLB feed succeeds")
+            AssertionError(
+                "pybaseball pitching_stats should not run when MLB feed succeeds"
+            )
         )
 
         saved_pybaseball = sys.modules.get("pybaseball")
@@ -500,8 +598,12 @@ class ReliabilityHardeningTests(unittest.TestCase):
             {
                 "pandas": _pandas_stub(),
                 "numpy": _numpy_stub(),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
-                "shared": types.SimpleNamespace(enrich_with_intel=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: ""
+                ),
+                "shared": types.SimpleNamespace(
+                    enrich_with_intel=lambda *_args, **_kwargs: None
+                ),
                 "trace_utils": _trace_utils_stub(),
             },
         )
@@ -545,8 +647,12 @@ class ReliabilityHardeningTests(unittest.TestCase):
             {
                 "pandas": _pandas_stub(),
                 "numpy": _numpy_stub(),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
-                "shared": types.SimpleNamespace(enrich_with_intel=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: ""
+                ),
+                "shared": types.SimpleNamespace(
+                    enrich_with_intel=lambda *_args, **_kwargs: None
+                ),
                 "trace_utils": _trace_utils_stub(),
             },
         )
@@ -558,15 +664,21 @@ class ReliabilityHardeningTests(unittest.TestCase):
         valuations_module.load_live_stats = lambda stats_type="both": (
             live_calls.append(stats_type) or (None, "live-pitchers")
         )
-        valuations_module._compute_pitcher_zscores_with_threshold = (
-            lambda df, min_ip: ("live-scored", df, min_ip)
+        valuations_module._compute_pitcher_zscores_with_threshold = lambda df, min_ip: (
+            "live-scored",
+            df,
+            min_ip,
         )
 
         proj_scored, live_scored = valuations_module._compute_live_scored_frames("P")
 
         self.assertEqual(live_calls, ["pit"])
-        self.assertEqual(proj_scored, ("projection-scored", ("derived-pitchers", "proj-pitchers")))
-        self.assertEqual(live_scored, ("live-scored", ("derived-pitchers", "live-pitchers"), 8))
+        self.assertEqual(
+            proj_scored, ("projection-scored", ("derived-pitchers", "proj-pitchers"))
+        )
+        self.assertEqual(
+            live_scored, ("live-scored", ("derived-pitchers", "live-pitchers"), 8)
+        )
 
     def test_roster_cmd_accepts_string_selected_position(self):
         mlb_cache_mod = _module("mlb_id_cache")
@@ -605,7 +717,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
         self.assertEqual(len(payload["players"]), 1)
         self.assertEqual(payload["players"][0]["position"], "C")
-        self.assertEqual(payload["players"][0]["eligible_positions"], ["C", "1B", "Util"])
+        self.assertEqual(
+            payload["players"][0]["eligible_positions"], ["C", "1B", "Util"]
+        )
         self.assertEqual(payload["players"][0]["mlb_id"], "mlb-Ben Rice")
 
     def test_roster_cmd_can_skip_intel_and_returns_dashboard_fields(self):
@@ -614,7 +728,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
         shared = _shared_stub()
         enrich_calls = []
-        shared.enrich_with_intel = lambda players, *args, **kwargs: enrich_calls.append(len(players))
+        shared.enrich_with_intel = lambda players, *args, **kwargs: enrich_calls.append(
+            len(players)
+        )
 
         module = _load_script(
             "yahoo_fantasy_roster_lite_script_for_test",
@@ -733,7 +849,10 @@ class ReliabilityHardeningTests(unittest.TestCase):
                         },
                         {
                             "person": {"fullName": "Minors Guy"},
-                            "status": {"code": "RM", "description": "Reassigned to Minors"},
+                            "status": {
+                                "code": "RM",
+                                "description": "Reassigned to Minors",
+                            },
                         },
                     ]
                 }
@@ -840,7 +959,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
             {
                 "shared": _shared_stub(),
                 "yahoo_fantasy_api": _module("yahoo_fantasy_api"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: ""
+                ),
                 "yahoo_browser": types.SimpleNamespace(
                     is_scope_error=lambda *_args, **_kwargs: False,
                     write_method=lambda *_args, **_kwargs: None,
@@ -911,7 +1032,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
         news_mod.fetch_aggregated_news = lambda **_kwargs: []
         with patch("builtins.print"):
-            news_mod._record_feed_warning("ESPN MLB", "rss_parse_error", "malformed xml")
+            news_mod._record_feed_warning(
+                "ESPN MLB", "rss_parse_error", "malformed xml"
+            )
         payload = news_mod.cmd_news_feed(["--source=espn", "--limit=1"], as_json=True)
         self.assertTrue(payload["warnings"])
         self.assertEqual(payload["warnings"][0]["source"], "ESPN MLB")
@@ -922,14 +1045,18 @@ class ReliabilityHardeningTests(unittest.TestCase):
         trace_utils_mod.monotonic_ms = lambda: 1
         trace_utils_mod.trace_config = lambda: {}
         s3_cache_mod = _module("s3_cache")
-        s3_cache_mod.s3_cache = types.SimpleNamespace(get=lambda *_args, **_kwargs: None, put=lambda *_args, **_kwargs: False)
+        s3_cache_mod.s3_cache = types.SimpleNamespace(
+            get=lambda *_args, **_kwargs: None, put=lambda *_args, **_kwargs: False
+        )
 
         intel_mod = _load_script(
             "intel_script_for_test",
             "intel.py",
             {
                 "shared": _shared_stub(),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: ""
+                ),
                 "trace_utils": trace_utils_mod,
                 "s3_cache": s3_cache_mod,
             },
@@ -1001,14 +1128,18 @@ class ReliabilityHardeningTests(unittest.TestCase):
             "intel.py",
             {
                 "shared": _shared_stub(),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: ""
+                ),
                 "trace_utils": trace_utils_mod,
                 "s3_cache": s3_cache_mod,
             },
         )
 
         pybaseball_mod = _module("pybaseball")
-        pybaseball_mod.pitching_stats = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not call pybaseball"))
+        pybaseball_mod.pitching_stats = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("should not call pybaseball")
+        )
         saved_pybaseball = sys.modules.get("pybaseball")
         sys.modules["pybaseball"] = pybaseball_mod
         try:
@@ -1029,14 +1160,18 @@ class ReliabilityHardeningTests(unittest.TestCase):
         trace_utils_mod.monotonic_ms = lambda: 1
         trace_utils_mod.trace_config = lambda: {}
         s3_cache_mod = _module("s3_cache")
-        s3_cache_mod.s3_cache = types.SimpleNamespace(get=lambda *_args, **_kwargs: None, put=lambda *_args, **_kwargs: True)
+        s3_cache_mod.s3_cache = types.SimpleNamespace(
+            get=lambda *_args, **_kwargs: None, put=lambda *_args, **_kwargs: True
+        )
 
         intel_mod = _load_script(
             "intel_script_singleflight_for_test",
             "intel.py",
             {
                 "shared": _shared_stub(),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: ""
+                ),
                 "trace_utils": trace_utils_mod,
                 "s3_cache": s3_cache_mod,
             },
@@ -1224,7 +1359,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: 301),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: 301
+                ),
             },
         )
 
@@ -1242,7 +1379,11 @@ class ReliabilityHardeningTests(unittest.TestCase):
                     "teams": [
                         {"id": 10, "name": "New York Yankees", "abbreviation": "NYY"},
                         {"id": 11, "name": "Boston Red Sox", "abbreviation": "BOS"},
-                        {"id": 12, "name": "Los Angeles Dodgers", "abbreviation": "LAD"},
+                        {
+                            "id": 12,
+                            "name": "Los Angeles Dodgers",
+                            "abbreviation": "LAD",
+                        },
                         {"id": 13, "name": "Chicago Cubs", "abbreviation": "CHC"},
                         {"id": 14, "name": "Seattle Mariners", "abbreviation": "SEA"},
                         {"id": 15, "name": "Houston Astros", "abbreviation": "HOU"},
@@ -1257,7 +1398,10 @@ class ReliabilityHardeningTests(unittest.TestCase):
                                 {
                                     "gamePk": 11,
                                     "gameDate": "2026-03-24T23:10:00Z",
-                                    "status": {"abstractGameState": "Live", "detailedState": "In Progress"},
+                                    "status": {
+                                        "abstractGameState": "Live",
+                                        "detailedState": "In Progress",
+                                    },
                                     "linescore": {
                                         "inningHalf": "Top",
                                         "currentInningOrdinal": "6th",
@@ -1275,26 +1419,65 @@ class ReliabilityHardeningTests(unittest.TestCase):
                                         },
                                     },
                                     "teams": {
-                                        "away": {"score": 4, "team": {"id": 10, "name": "New York Yankees"}},
-                                        "home": {"score": 2, "team": {"id": 11, "name": "Boston Red Sox"}},
+                                        "away": {
+                                            "score": 4,
+                                            "team": {
+                                                "id": 10,
+                                                "name": "New York Yankees",
+                                            },
+                                        },
+                                        "home": {
+                                            "score": 2,
+                                            "team": {
+                                                "id": 11,
+                                                "name": "Boston Red Sox",
+                                            },
+                                        },
                                     },
                                 },
                                 {
                                     "gamePk": 22,
                                     "gameDate": "2026-03-25T00:05:00Z",
-                                    "status": {"abstractGameState": "Preview", "detailedState": "Scheduled"},
+                                    "status": {
+                                        "abstractGameState": "Preview",
+                                        "detailedState": "Scheduled",
+                                    },
                                     "teams": {
-                                        "away": {"score": 0, "team": {"id": 12, "name": "Los Angeles Dodgers"}},
-                                        "home": {"score": 0, "team": {"id": 13, "name": "Chicago Cubs"}},
+                                        "away": {
+                                            "score": 0,
+                                            "team": {
+                                                "id": 12,
+                                                "name": "Los Angeles Dodgers",
+                                            },
+                                        },
+                                        "home": {
+                                            "score": 0,
+                                            "team": {"id": 13, "name": "Chicago Cubs"},
+                                        },
                                     },
                                 },
                                 {
                                     "gamePk": 33,
                                     "gameDate": "2026-03-25T01:10:00Z",
-                                    "status": {"abstractGameState": "Preview", "detailedState": "Scheduled"},
+                                    "status": {
+                                        "abstractGameState": "Preview",
+                                        "detailedState": "Scheduled",
+                                    },
                                     "teams": {
-                                        "away": {"score": 0, "team": {"id": 14, "name": "Seattle Mariners"}},
-                                        "home": {"score": 0, "team": {"id": 15, "name": "Houston Astros"}},
+                                        "away": {
+                                            "score": 0,
+                                            "team": {
+                                                "id": 14,
+                                                "name": "Seattle Mariners",
+                                            },
+                                        },
+                                        "home": {
+                                            "score": 0,
+                                            "team": {
+                                                "id": 15,
+                                                "name": "Houston Astros",
+                                            },
+                                        },
                                     },
                                 },
                             ],
@@ -1309,9 +1492,13 @@ class ReliabilityHardeningTests(unittest.TestCase):
         yahoo_module.TEAM_ID = "422.l.1.t.8"
         yahoo_module._extract_team_key = lambda team_data: team_data.get("team_key", "")
         yahoo_module._extract_team_name = lambda team_data: team_data.get("name", "")
-        yahoo_module._selected_position = lambda player: player.get("selected_position", "")
+        yahoo_module._selected_position = lambda player: player.get(
+            "selected_position", ""
+        )
         yahoo_module._player_name = lambda player: player.get("name", "")
-        yahoo_module._player_team_abbr = lambda player: player.get("editorial_team_abbr", "")
+        yahoo_module._player_team_abbr = lambda player: player.get(
+            "editorial_team_abbr", ""
+        )
 
         class FakeRosterTeam:
             def __init__(self, players):
@@ -1335,8 +1522,14 @@ class ReliabilityHardeningTests(unittest.TestCase):
                                                 "matchup": {
                                                     "0": {
                                                         "teams": {
-                                                            "0": {"team_key": "422.l.1.t.8", "name": "Marsh'n Monsters"},
-                                                            "1": {"team_key": "422.l.1.t.4", "name": "Bobby Bonilla's IRA"},
+                                                            "0": {
+                                                                "team_key": "422.l.1.t.8",
+                                                                "name": "Marsh'n Monsters",
+                                                            },
+                                                            "1": {
+                                                                "team_key": "422.l.1.t.4",
+                                                                "name": "Bobby Bonilla's IRA",
+                                                            },
                                                         }
                                                     }
                                                 }
@@ -1353,15 +1546,31 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 if team_key == "422.l.1.t.8":
                     return FakeRosterTeam(
                         [
-                            {"name": "My Starter", "selected_position": "OF", "editorial_team_abbr": "NYY"},
-                            {"name": "My Bench Bat", "selected_position": "BN", "editorial_team_abbr": "CHC"},
+                            {
+                                "name": "My Starter",
+                                "selected_position": "OF",
+                                "editorial_team_abbr": "NYY",
+                            },
+                            {
+                                "name": "My Bench Bat",
+                                "selected_position": "BN",
+                                "editorial_team_abbr": "CHC",
+                            },
                         ]
                     )
                 if team_key == "422.l.1.t.4":
                     return FakeRosterTeam(
                         [
-                            {"name": "Opp Starter", "selected_position": "Util", "editorial_team_abbr": "BOS"},
-                            {"name": "Opp IL Arm", "selected_position": "IL", "editorial_team_abbr": "LAD"},
+                            {
+                                "name": "Opp Starter",
+                                "selected_position": "Util",
+                                "editorial_team_abbr": "BOS",
+                            },
+                            {
+                                "name": "Opp IL Arm",
+                                "selected_position": "IL",
+                                "editorial_team_abbr": "LAD",
+                            },
                         ]
                     )
                 return FakeRosterTeam([])
@@ -1387,7 +1596,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
@@ -1395,10 +1606,16 @@ class ReliabilityHardeningTests(unittest.TestCase):
         api_module._mlb_media_links_for_game = lambda game_pk, game_date: {
             "watch_url": "https://www.mlb.com/tv/g" + str(game_pk),
             "watch_links": [
-                {"label": "TV Home (YES)", "url": "https://www.mlb.com/tv/g" + str(game_pk) + "/vvideo"}
+                {
+                    "label": "TV Home (YES)",
+                    "url": "https://www.mlb.com/tv/g" + str(game_pk) + "/vvideo",
+                }
             ],
             "audio_links": [
-                {"label": "Listen Home (WFAN)", "url": "https://www.mlb.com/tv/g" + str(game_pk) + "/vhome"}
+                {
+                    "label": "Listen Home (WFAN)",
+                    "url": "https://www.mlb.com/tv/g" + str(game_pk) + "/vhome",
+                }
             ],
         }
         api_module.request.args = {"date": "2026-03-24"}
@@ -1407,12 +1624,19 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(payload["date"], "2026-03-24")
         self.assertIn("generated_at", payload)
         self.assertEqual(len(payload["games"]), 3)
-        self.assertEqual([game["game_id"] for game in payload["games"]], ["mlb-11", "mlb-22", "mlb-33"])
+        self.assertEqual(
+            [game["game_id"] for game in payload["games"]],
+            ["mlb-11", "mlb-22", "mlb-33"],
+        )
 
-        live_game = next(game for game in payload["games"] if game["game_id"] == "mlb-11")
+        live_game = next(
+            game for game in payload["games"] if game["game_id"] == "mlb-11"
+        )
         self.assertEqual(live_game["status"], "In Progress")
         self.assertEqual(live_game["inning"], "Top 6th")
-        self.assertTrue(live_game["game_time"].endswith("+00:00") or "T" in live_game["game_time"])
+        self.assertTrue(
+            live_game["game_time"].endswith("+00:00") or "T" in live_game["game_time"]
+        )
         self.assertEqual(
             live_game["live_state"],
             {
@@ -1439,20 +1663,32 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(live_game["my_players"][0]["team_abbr"], "NYY")
         self.assertEqual(live_game["opp_players"][0]["fantasy_position"], "Util")
         self.assertEqual(live_game["opp_players"][0]["team_abbr"], "BOS")
-        self.assertEqual(live_game["media_links"]["watch_url"], "https://www.mlb.com/tv/g11")
-        self.assertEqual(live_game["media_links"]["watch_links"][0]["label"], "TV Home (YES)")
-        self.assertEqual(live_game["media_links"]["audio_links"][0]["label"], "Listen Home (WFAN)")
+        self.assertEqual(
+            live_game["media_links"]["watch_url"], "https://www.mlb.com/tv/g11"
+        )
+        self.assertEqual(
+            live_game["media_links"]["watch_links"][0]["label"], "TV Home (YES)"
+        )
+        self.assertEqual(
+            live_game["media_links"]["audio_links"][0]["label"], "Listen Home (WFAN)"
+        )
 
-        scheduled_game = next(game for game in payload["games"] if game["game_id"] == "mlb-22")
+        scheduled_game = next(
+            game for game in payload["games"] if game["game_id"] == "mlb-22"
+        )
         self.assertNotIn("live_state", scheduled_game)
         self.assertEqual(scheduled_game["my_inactive_count"], 1)
         self.assertEqual(scheduled_game["opp_inactive_count"], 1)
         self.assertEqual(scheduled_game["total_relevant_count"], 2)
         self.assertEqual(scheduled_game["my_players"][0]["team_abbr"], "CHC")
         self.assertEqual(scheduled_game["opp_players"][0]["team_abbr"], "LAD")
-        self.assertEqual(scheduled_game["media_links"]["watch_url"], "https://www.mlb.com/tv/g22")
+        self.assertEqual(
+            scheduled_game["media_links"]["watch_url"], "https://www.mlb.com/tv/g22"
+        )
 
-        empty_game = next(game for game in payload["games"] if game["game_id"] == "mlb-33")
+        empty_game = next(
+            game for game in payload["games"] if game["game_id"] == "mlb-33"
+        )
         self.assertEqual(empty_game["total_relevant_count"], 0)
         self.assertEqual(empty_game["my_players"], [])
         self.assertEqual(empty_game["opp_players"], [])
@@ -1477,7 +1713,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
@@ -1495,7 +1733,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
         self.assertEqual(payload["date"], "2026-03-24")
         self.assertEqual(payload["generated_at"], "2026-03-24T16:00:00Z")
-        self.assertEqual(payload["games"], [{"game_id": "mlb-22", "status": "Scheduled"}])
+        self.assertEqual(
+            payload["games"], [{"game_id": "mlb-22", "status": "Scheduled"}]
+        )
 
     def test_mlb_media_links_endpoint_returns_links_for_game(self):
         api_module = _load_script(
@@ -1517,18 +1757,29 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
         api_module._mlb_media_links_for_game = lambda game_pk, game_date: {
             "watch_url": "https://www.mlb.com/tv/g" + str(game_pk),
             "watch_links": [
-                {"label": "TV Home (SNY)", "url": "https://www.mlb.com/tv/g" + str(game_pk) + "/vvideo"}
+                {
+                    "label": "TV Home (SNY)",
+                    "url": "https://www.mlb.com/tv/g" + str(game_pk) + "/vvideo",
+                }
             ],
             "audio_links": [
-                {"label": "Listen Home (WHSQ 880AM)", "url": "https://www.mlb.com/tv/g" + str(game_pk) + "/vhome"},
-                {"label": "Listen Away (KDKA)", "url": "https://www.mlb.com/tv/g" + str(game_pk) + "/vaway"},
+                {
+                    "label": "Listen Home (WHSQ 880AM)",
+                    "url": "https://www.mlb.com/tv/g" + str(game_pk) + "/vhome",
+                },
+                {
+                    "label": "Listen Away (KDKA)",
+                    "url": "https://www.mlb.com/tv/g" + str(game_pk) + "/vaway",
+                },
             ],
         }
 
@@ -1537,17 +1788,22 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
         self.assertEqual(payload["game_id"], "mlb-823649")
         self.assertEqual(payload["game_pk"], "823649")
-        self.assertEqual(payload["media_links"]["watch_url"], "https://www.mlb.com/tv/g823649")
-        self.assertEqual(payload["media_links"]["watch_links"][0]["label"], "TV Home (SNY)")
+        self.assertEqual(
+            payload["media_links"]["watch_url"], "https://www.mlb.com/tv/g823649"
+        )
+        self.assertEqual(
+            payload["media_links"]["watch_links"][0]["label"], "TV Home (SNY)"
+        )
         self.assertEqual(len(payload["media_links"]["audio_links"]), 2)
-        self.assertEqual(payload["media_links"]["audio_links"][0]["label"], "Listen Home (WHSQ 880AM)")
+        self.assertEqual(
+            payload["media_links"]["audio_links"][0]["label"],
+            "Listen Home (WHSQ 880AM)",
+        )
 
     def test_operator_scoreboard_endpoint_degrades_when_fantasy_linkage_fails(self):
         shared_module = _shared_stub()
         shared_module.mlb_fetch = lambda endpoint, *_args, **_kwargs: (
-            {
-                "teams": [{"id": 10, "name": "New York Yankees", "abbreviation": "NYY"}]
-            }
+            {"teams": [{"id": 10, "name": "New York Yankees", "abbreviation": "NYY"}]}
             if endpoint.startswith("/teams?sportId=1")
             else {
                 "dates": [
@@ -1557,10 +1813,19 @@ class ReliabilityHardeningTests(unittest.TestCase):
                             {
                                 "gamePk": 44,
                                 "gameDate": "2026-03-24T23:10:00Z",
-                                "status": {"abstractGameState": "Preview", "detailedState": "Scheduled"},
+                                "status": {
+                                    "abstractGameState": "Preview",
+                                    "detailedState": "Scheduled",
+                                },
                                 "teams": {
-                                    "away": {"score": 0, "team": {"id": 10, "name": "New York Yankees"}},
-                                    "home": {"score": 0, "team": {"id": 10, "name": "New York Yankees"}},
+                                    "away": {
+                                        "score": 0,
+                                        "team": {"id": 10, "name": "New York Yankees"},
+                                    },
+                                    "home": {
+                                        "score": 0,
+                                        "team": {"id": 10, "name": "New York Yankees"},
+                                    },
                                 },
                             }
                         ],
@@ -1571,7 +1836,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
         yahoo_module = _module("yahoo-fantasy")
         yahoo_module.TEAM_ID = "422.l.1.t.8"
-        yahoo_module.get_league = lambda: (_ for _ in ()).throw(RuntimeError("yahoo down"))
+        yahoo_module.get_league = lambda: (_ for _ in ()).throw(
+            RuntimeError("yahoo down")
+        )
         yahoo_module._extract_team_key = lambda *_args, **_kwargs: ""
         yahoo_module._extract_team_name = lambda *_args, **_kwargs: ""
         yahoo_module._selected_position = lambda *_args, **_kwargs: ""
@@ -1597,7 +1864,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
@@ -1636,7 +1905,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
@@ -1683,7 +1954,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
@@ -1738,7 +2011,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
@@ -1870,7 +2145,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
@@ -1902,14 +2179,28 @@ class ReliabilityHardeningTests(unittest.TestCase):
                                                 "matchup": {
                                                     "0": {
                                                         "teams": {
-                                                            "0": {"team_key": "422.l.1.t.8", "name": "Marsh'n Monsters"},
-                                                            "1": {"team_key": "422.l.1.t.4", "name": "Bobby Bonilla's IRA"},
+                                                            "0": {
+                                                                "team_key": "422.l.1.t.8",
+                                                                "name": "Marsh'n Monsters",
+                                                            },
+                                                            "1": {
+                                                                "team_key": "422.l.1.t.4",
+                                                                "name": "Bobby Bonilla's IRA",
+                                                            },
                                                         }
                                                     },
                                                     "status": "midevent",
                                                     "stat_winners": [
-                                                        {"stat_winner": {"winner_team_key": "422.l.1.t.8"}},
-                                                        {"stat_winner": {"winner_team_key": "422.l.1.t.4"}},
+                                                        {
+                                                            "stat_winner": {
+                                                                "winner_team_key": "422.l.1.t.8"
+                                                            }
+                                                        },
+                                                        {
+                                                            "stat_winner": {
+                                                                "winner_team_key": "422.l.1.t.4"
+                                                            }
+                                                        },
                                                         {"stat_winner": {"is_tied": 1}},
                                                     ],
                                                 }
@@ -1918,14 +2209,28 @@ class ReliabilityHardeningTests(unittest.TestCase):
                                                 "matchup": {
                                                     "0": {
                                                         "teams": {
-                                                            "0": {"team_key": "422.l.1.t.2", "name": "Bo Knows"},
-                                                            "1": {"team_key": "422.l.1.t.3", "name": "The Boys of Summer"},
+                                                            "0": {
+                                                                "team_key": "422.l.1.t.2",
+                                                                "name": "Bo Knows",
+                                                            },
+                                                            "1": {
+                                                                "team_key": "422.l.1.t.3",
+                                                                "name": "The Boys of Summer",
+                                                            },
                                                         }
                                                     },
                                                     "status": "midevent",
                                                     "stat_winners": [
-                                                        {"stat_winner": {"winner_team_key": "422.l.1.t.2"}},
-                                                        {"stat_winner": {"winner_team_key": "422.l.1.t.2"}},
+                                                        {
+                                                            "stat_winner": {
+                                                                "winner_team_key": "422.l.1.t.2"
+                                                            }
+                                                        },
+                                                        {
+                                                            "stat_winner": {
+                                                                "winner_team_key": "422.l.1.t.2"
+                                                            }
+                                                        },
                                                     ],
                                                 }
                                             },
@@ -1958,7 +2263,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
@@ -2002,7 +2309,10 @@ class ReliabilityHardeningTests(unittest.TestCase):
                                 {
                                     "gamePk": 11,
                                     "gameDate": "2026-03-24T23:10:00Z",
-                                    "status": {"abstractGameState": "Live", "detailedState": "In Progress"},
+                                    "status": {
+                                        "abstractGameState": "Live",
+                                        "detailedState": "In Progress",
+                                    },
                                     "linescore": {
                                         "inningHalf": "Top",
                                         "currentInningOrdinal": "6th",
@@ -2010,12 +2320,29 @@ class ReliabilityHardeningTests(unittest.TestCase):
                                         "outs": 1,
                                         "balls": 2,
                                         "strikes": 1,
-                                        "offense": {"first": {"id": 1}, "batter": {"fullName": "Aaron Judge"}},
-                                        "defense": {"pitcher": {"fullName": "Garrett Crochet"}},
+                                        "offense": {
+                                            "first": {"id": 1},
+                                            "batter": {"fullName": "Aaron Judge"},
+                                        },
+                                        "defense": {
+                                            "pitcher": {"fullName": "Garrett Crochet"}
+                                        },
                                     },
                                     "teams": {
-                                        "away": {"score": 4, "team": {"id": 10, "name": "New York Yankees"}},
-                                        "home": {"score": 2, "team": {"id": 11, "name": "Boston Red Sox"}},
+                                        "away": {
+                                            "score": 4,
+                                            "team": {
+                                                "id": 10,
+                                                "name": "New York Yankees",
+                                            },
+                                        },
+                                        "home": {
+                                            "score": 2,
+                                            "team": {
+                                                "id": 11,
+                                                "name": "Boston Red Sox",
+                                            },
+                                        },
                                     },
                                 }
                             ],
@@ -2030,9 +2357,13 @@ class ReliabilityHardeningTests(unittest.TestCase):
         yahoo_module.TEAM_ID = "422.l.1.t.8"
         yahoo_module._extract_team_key = lambda team_data: team_data.get("team_key", "")
         yahoo_module._extract_team_name = lambda team_data: team_data.get("name", "")
-        yahoo_module._selected_position = lambda player: player.get("selected_position", "")
+        yahoo_module._selected_position = lambda player: player.get(
+            "selected_position", ""
+        )
         yahoo_module._player_name = lambda player: player.get("name", "")
-        yahoo_module._player_team_abbr = lambda player: player.get("editorial_team_abbr", "")
+        yahoo_module._player_team_abbr = lambda player: player.get(
+            "editorial_team_abbr", ""
+        )
 
         class FakeRosterTeam:
             def __init__(self, players):
@@ -2056,8 +2387,14 @@ class ReliabilityHardeningTests(unittest.TestCase):
                                                 "matchup": {
                                                     "0": {
                                                         "teams": {
-                                                            "0": {"team_key": "422.l.1.t.8", "name": "Marsh'n Monsters"},
-                                                            "1": {"team_key": "422.l.1.t.4", "name": "Bobby Bonilla's IRA"},
+                                                            "0": {
+                                                                "team_key": "422.l.1.t.8",
+                                                                "name": "Marsh'n Monsters",
+                                                            },
+                                                            "1": {
+                                                                "team_key": "422.l.1.t.4",
+                                                                "name": "Bobby Bonilla's IRA",
+                                                            },
                                                         }
                                                     }
                                                 }
@@ -2072,9 +2409,25 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
             def to_team(self, team_key):
                 if team_key == "422.l.1.t.8":
-                    return FakeRosterTeam([{"name": "My Starter", "selected_position": "OF", "editorial_team_abbr": "NYY"}])
+                    return FakeRosterTeam(
+                        [
+                            {
+                                "name": "My Starter",
+                                "selected_position": "OF",
+                                "editorial_team_abbr": "NYY",
+                            }
+                        ]
+                    )
                 if team_key == "422.l.1.t.4":
-                    return FakeRosterTeam([{"name": "Opp Starter", "selected_position": "Util", "editorial_team_abbr": "BOS"}])
+                    return FakeRosterTeam(
+                        [
+                            {
+                                "name": "Opp Starter",
+                                "selected_position": "Util",
+                                "editorial_team_abbr": "BOS",
+                            }
+                        ]
+                    )
                 return FakeRosterTeam([])
 
         yahoo_module.get_league = lambda: (None, None, FakeLeague())
@@ -2098,7 +2451,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
@@ -2127,7 +2482,11 @@ class ReliabilityHardeningTests(unittest.TestCase):
                     "teams": [
                         {"id": 10, "name": "New York Yankees", "abbreviation": "NYY"},
                         {"id": 11, "name": "Boston Red Sox", "abbreviation": "BOS"},
-                        {"id": 12, "name": "Los Angeles Dodgers", "abbreviation": "LAD"},
+                        {
+                            "id": 12,
+                            "name": "Los Angeles Dodgers",
+                            "abbreviation": "LAD",
+                        },
                         {"id": 13, "name": "Chicago Cubs", "abbreviation": "CHC"},
                     ]
                 }
@@ -2140,7 +2499,10 @@ class ReliabilityHardeningTests(unittest.TestCase):
                                 {
                                     "gamePk": 11,
                                     "gameDate": "2026-03-24T23:10:00Z",
-                                    "status": {"abstractGameState": "Live", "detailedState": "In Progress"},
+                                    "status": {
+                                        "abstractGameState": "Live",
+                                        "detailedState": "In Progress",
+                                    },
                                     "linescore": {
                                         "inningHalf": "Top",
                                         "currentInningOrdinal": "6th",
@@ -2148,21 +2510,50 @@ class ReliabilityHardeningTests(unittest.TestCase):
                                         "outs": 1,
                                         "balls": 2,
                                         "strikes": 1,
-                                        "offense": {"first": {"id": 1}, "batter": {"fullName": "Aaron Judge"}},
-                                        "defense": {"pitcher": {"fullName": "Garrett Crochet"}},
+                                        "offense": {
+                                            "first": {"id": 1},
+                                            "batter": {"fullName": "Aaron Judge"},
+                                        },
+                                        "defense": {
+                                            "pitcher": {"fullName": "Garrett Crochet"}
+                                        },
                                     },
                                     "teams": {
-                                        "away": {"score": 4, "team": {"id": 10, "name": "New York Yankees"}},
-                                        "home": {"score": 2, "team": {"id": 11, "name": "Boston Red Sox"}},
+                                        "away": {
+                                            "score": 4,
+                                            "team": {
+                                                "id": 10,
+                                                "name": "New York Yankees",
+                                            },
+                                        },
+                                        "home": {
+                                            "score": 2,
+                                            "team": {
+                                                "id": 11,
+                                                "name": "Boston Red Sox",
+                                            },
+                                        },
                                     },
                                 },
                                 {
                                     "gamePk": 22,
                                     "gameDate": "2026-03-25T00:05:00Z",
-                                    "status": {"abstractGameState": "Preview", "detailedState": "Scheduled"},
+                                    "status": {
+                                        "abstractGameState": "Preview",
+                                        "detailedState": "Scheduled",
+                                    },
                                     "teams": {
-                                        "away": {"score": 0, "team": {"id": 12, "name": "Los Angeles Dodgers"}},
-                                        "home": {"score": 0, "team": {"id": 13, "name": "Chicago Cubs"}},
+                                        "away": {
+                                            "score": 0,
+                                            "team": {
+                                                "id": 12,
+                                                "name": "Los Angeles Dodgers",
+                                            },
+                                        },
+                                        "home": {
+                                            "score": 0,
+                                            "team": {"id": 13, "name": "Chicago Cubs"},
+                                        },
                                     },
                                 },
                             ],
@@ -2177,9 +2568,13 @@ class ReliabilityHardeningTests(unittest.TestCase):
         yahoo_module.TEAM_ID = "422.l.1.t.8"
         yahoo_module._extract_team_key = lambda team_data: team_data.get("team_key", "")
         yahoo_module._extract_team_name = lambda team_data: team_data.get("name", "")
-        yahoo_module._selected_position = lambda player: player.get("selected_position", "")
+        yahoo_module._selected_position = lambda player: player.get(
+            "selected_position", ""
+        )
         yahoo_module._player_name = lambda player: player.get("name", "")
-        yahoo_module._player_team_abbr = lambda player: player.get("editorial_team_abbr", "")
+        yahoo_module._player_team_abbr = lambda player: player.get(
+            "editorial_team_abbr", ""
+        )
 
         class FakeRosterTeam:
             def __init__(self, players):
@@ -2203,8 +2598,14 @@ class ReliabilityHardeningTests(unittest.TestCase):
                                                 "matchup": {
                                                     "0": {
                                                         "teams": {
-                                                            "0": {"team_key": "422.l.1.t.8", "name": "Marsh'n Monsters"},
-                                                            "1": {"team_key": "422.l.1.t.4", "name": "Bobby Bonilla's IRA"},
+                                                            "0": {
+                                                                "team_key": "422.l.1.t.8",
+                                                                "name": "Marsh'n Monsters",
+                                                            },
+                                                            "1": {
+                                                                "team_key": "422.l.1.t.4",
+                                                                "name": "Bobby Bonilla's IRA",
+                                                            },
                                                         }
                                                     }
                                                 }
@@ -2219,9 +2620,25 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
             def to_team(self, team_key):
                 if team_key == "422.l.1.t.8":
-                    return FakeRosterTeam([{"name": "My Starter", "selected_position": "OF", "editorial_team_abbr": "NYY"}])
+                    return FakeRosterTeam(
+                        [
+                            {
+                                "name": "My Starter",
+                                "selected_position": "OF",
+                                "editorial_team_abbr": "NYY",
+                            }
+                        ]
+                    )
                 if team_key == "422.l.1.t.4":
-                    return FakeRosterTeam([{"name": "Opp Starter", "selected_position": "Util", "editorial_team_abbr": "BOS"}])
+                    return FakeRosterTeam(
+                        [
+                            {
+                                "name": "Opp Starter",
+                                "selected_position": "Util",
+                                "editorial_team_abbr": "BOS",
+                            }
+                        ]
+                    )
                 return FakeRosterTeam([])
 
         yahoo_module.get_league = lambda: (None, None, FakeLeague())
@@ -2245,14 +2662,18 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
         api_module._DASHBOARD_CACHE = {}
         api_module._dashboard_cache_get = lambda *_args, **_kwargs: None
         api_module._dashboard_cache_set = lambda *_args, **_kwargs: None
-        api_module._operator_scoreboard_payload = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not build full day payload"))
+        api_module._operator_scoreboard_payload = lambda *_args, **_kwargs: (
+            _ for _ in ()
+        ).throw(AssertionError("should not build full day payload"))
         api_module.request.args = {"date": "2026-03-24", "game_id": "mlb-11"}
         payload = api_module.api_operator_scoreboard_game()
 
@@ -2285,26 +2706,51 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
         calls = []
         cached_payloads = []
         api_module._dashboard_cache_get = lambda *_args, **_kwargs: None
-        api_module._dashboard_cache_set = lambda key, payload: cached_payloads.append((key, payload))
-        api_module._safe_injury_report = lambda include_intel=False: calls.append(("injury", include_intel)) or {"injured_active": []}
-        api_module._safe_lineup_preview = lambda include_intel=False: calls.append(("lineup", include_intel)) or {"active_off_day": []}
-        api_module._safe_whats_new = lambda include_intel=False: calls.append(("whats_new", include_intel)) or {"pending_trades": []}
-        api_module._safe_waiver_analyze = lambda pos_type, count, include_intel=False: calls.append(("waiver", pos_type, str(count), include_intel)) or {
-            "recommendations": [],
-            "weak_categories": [],
-        }
+        api_module._dashboard_cache_set = lambda key, payload: cached_payloads.append(
+            (key, payload)
+        )
+        api_module._safe_injury_report = lambda include_intel=False: calls.append(
+            ("injury", include_intel)
+        ) or {"injured_active": []}
+        api_module._safe_lineup_preview = lambda include_intel=False: calls.append(
+            ("lineup", include_intel)
+        ) or {"active_off_day": []}
+        api_module._safe_whats_new = lambda include_intel=False: calls.append(
+            ("whats_new", include_intel)
+        ) or {"pending_trades": []}
+        api_module._safe_waiver_analyze = (
+            lambda pos_type, count, include_intel=False: calls.append(
+                ("waiver", pos_type, str(count), include_intel)
+            )
+            or {
+                "recommendations": [],
+                "weak_categories": [],
+            }
+        )
         api_module._safe_call = lambda fn, args=None: fn(args or [], as_json=True)
-        api_module._synthesize_morning_actions = lambda *_args, **_kwargs: [{"priority": 1, "type": "noop"}]
-        api_module.yahoo_fantasy.get_league = lambda: (None, None, types.SimpleNamespace(edit_date=lambda: "2026-04-03"))
-        api_module.yahoo_fantasy.cmd_matchup_detail = lambda args=None, as_json=False: {"matchup": "ok"}
-        api_module.season_manager.cmd_matchup_strategy = lambda args=None, as_json=False: {"strategy": "ok"}
+        api_module._synthesize_morning_actions = lambda *_args, **_kwargs: [
+            {"priority": 1, "type": "noop"}
+        ]
+        api_module.yahoo_fantasy.get_league = lambda: (
+            None,
+            None,
+            types.SimpleNamespace(edit_date=lambda: "2026-04-03"),
+        )
+        api_module.yahoo_fantasy.cmd_matchup_detail = lambda args=None, as_json=False: {
+            "matchup": "ok"
+        }
+        api_module.season_manager.cmd_matchup_strategy = (
+            lambda args=None, as_json=False: {"strategy": "ok"}
+        )
 
         payload = api_module.workflow_morning_briefing()
 
@@ -2344,17 +2790,29 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
         expected = {"action_items": [{"priority": 1}], "cached": True}
         api_module._dashboard_cache_get = lambda *_args, **_kwargs: expected
-        api_module._dashboard_cache_set = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not write cache"))
-        api_module._safe_injury_report = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not compute injury"))
-        api_module._safe_lineup_preview = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not compute lineup"))
-        api_module._safe_whats_new = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not compute digest"))
-        api_module._safe_waiver_analyze = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not compute waivers"))
+        api_module._dashboard_cache_set = lambda *_args, **_kwargs: (
+            _ for _ in ()
+        ).throw(AssertionError("should not write cache"))
+        api_module._safe_injury_report = lambda *_args, **_kwargs: (
+            _ for _ in ()
+        ).throw(AssertionError("should not compute injury"))
+        api_module._safe_lineup_preview = lambda *_args, **_kwargs: (
+            _ for _ in ()
+        ).throw(AssertionError("should not compute lineup"))
+        api_module._safe_whats_new = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("should not compute digest")
+        )
+        api_module._safe_waiver_analyze = lambda *_args, **_kwargs: (
+            _ for _ in ()
+        ).throw(AssertionError("should not compute waivers"))
 
         payload = api_module.workflow_morning_briefing()
 
@@ -2380,7 +2838,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
@@ -2388,14 +2848,25 @@ class ReliabilityHardeningTests(unittest.TestCase):
         api_module.request.args = {"count": "7"}
         api_module._dashboard_cache_get = lambda *_args, **_kwargs: None
         api_module._dashboard_cache_set = lambda *_args, **_kwargs: None
-        api_module._safe_waiver_analyze = lambda pos_type, count, include_intel=False: calls.append((pos_type, str(count), include_intel)) or {
-            "recommendations": [],
-            "weak_categories": [],
-        }
-        api_module._safe_roster = lambda include_intel=False: calls.append(("roster", include_intel)) or {"players": []}
+        api_module._safe_waiver_analyze = (
+            lambda pos_type, count, include_intel=False: calls.append(
+                (pos_type, str(count), include_intel)
+            )
+            or {
+                "recommendations": [],
+                "weak_categories": [],
+            }
+        )
+        api_module._safe_roster = lambda include_intel=False: calls.append(
+            ("roster", include_intel)
+        ) or {"players": []}
         api_module._safe_call = lambda fn, args=None: fn(args or [], as_json=True)
-        api_module._synthesize_waiver_pairs = lambda waiver_b, waiver_p: [{"batters": waiver_b, "pitchers": waiver_p}]
-        api_module.season_manager.cmd_category_check = lambda args=None, as_json=False: {"categories": []}
+        api_module._synthesize_waiver_pairs = lambda waiver_b, waiver_p: [
+            {"batters": waiver_b, "pitchers": waiver_p}
+        ]
+        api_module.season_manager.cmd_category_check = (
+            lambda args=None, as_json=False: {"categories": []}
+        )
 
         payload = api_module.workflow_waiver_recommendations()
 
@@ -2427,19 +2898,35 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
         calls = []
         api_module._dashboard_cache_get = lambda *_args, **_kwargs: None
         api_module._dashboard_cache_set = lambda *_args, **_kwargs: None
-        api_module._safe_injury_report = lambda include_intel=False: calls.append(("injury", include_intel)) or {"injured_active": []}
-        api_module._safe_lineup_preview = lambda include_intel=False: calls.append(("lineup", include_intel)) or {"active_off_day": []}
-        api_module._safe_roster = lambda include_intel=False: calls.append(("roster", include_intel)) or {"players": [{"name": "Bench Bat"}]}
+        api_module._safe_injury_report = lambda include_intel=False: calls.append(
+            ("injury", include_intel)
+        ) or {"injured_active": []}
+        api_module._safe_lineup_preview = lambda include_intel=False: calls.append(
+            ("lineup", include_intel)
+        ) or {"active_off_day": []}
+        api_module._safe_roster = lambda include_intel=False: calls.append(
+            ("roster", include_intel)
+        ) or {"players": [{"name": "Bench Bat"}]}
         api_module._safe_call = lambda fn, args=None: fn(args or [], as_json=True)
-        api_module._synthesize_roster_issues = lambda injury, lineup, roster, busts: [{"severity": "info", "count": len(roster.get("players", [])) + len(busts.get("candidates", []))}]
-        api_module.intel.cmd_busts = lambda args=None, as_json=False: {"candidates": [{"name": "Bench Bat"}]}
+        api_module._synthesize_roster_issues = lambda injury, lineup, roster, busts: [
+            {
+                "severity": "info",
+                "count": len(roster.get("players", []))
+                + len(busts.get("candidates", [])),
+            }
+        ]
+        api_module.intel.cmd_busts = lambda args=None, as_json=False: {
+            "candidates": [{"name": "Bench Bat"}]
+        }
 
         payload = api_module.workflow_roster_health()
 
@@ -2470,7 +2957,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
@@ -2478,8 +2967,12 @@ class ReliabilityHardeningTests(unittest.TestCase):
         cached_payloads = []
         api_module.request.args = {"player_name": " Aaron Judge "}
         api_module._dashboard_cache_get = lambda *_args, **_kwargs: None
-        api_module._dashboard_cache_set = lambda key, payload: cached_payloads.append((key, payload))
-        api_module.valuations.cmd_value = lambda args=None, as_json=False: calls.append((args or [], as_json)) or {"players": [{"name": args[0]}]}
+        api_module._dashboard_cache_set = lambda key, payload: cached_payloads.append(
+            (key, payload)
+        )
+        api_module.valuations.cmd_value = lambda args=None, as_json=False: calls.append(
+            (args or [], as_json)
+        ) or {"players": [{"name": args[0]}]}
 
         payload = api_module.api_value()
 
@@ -2508,15 +3001,21 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
         expected = {"players": [{"name": "Aaron Judge"}], "cached": True}
         api_module.request.args = {"player_name": "Aaron Judge"}
         api_module._dashboard_cache_get = lambda *_args, **_kwargs: expected
-        api_module._dashboard_cache_set = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not write cache"))
-        api_module.valuations.cmd_value = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not recompute value"))
+        api_module._dashboard_cache_set = lambda *_args, **_kwargs: (
+            _ for _ in ()
+        ).throw(AssertionError("should not write cache"))
+        api_module.valuations.cmd_value = lambda *_args, **_kwargs: (
+            _ for _ in ()
+        ).throw(AssertionError("should not recompute value"))
 
         payload = api_module.api_value()
 
@@ -2542,15 +3041,22 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
         calls = []
         cached_payloads = []
         api_module._dashboard_cache_get = lambda *_args, **_kwargs: None
-        api_module._dashboard_cache_set = lambda key, payload: cached_payloads.append((key, payload))
-        api_module.season_manager.cmd_injury_report = lambda args=None, as_json=False: calls.append((args or [], as_json)) or {"injured_active": []}
+        api_module._dashboard_cache_set = lambda key, payload: cached_payloads.append(
+            (key, payload)
+        )
+        api_module.season_manager.cmd_injury_report = (
+            lambda args=None, as_json=False: calls.append((args or [], as_json))
+            or {"injured_active": []}
+        )
 
         payload = api_module.api_injury_report()
 
@@ -2579,14 +3085,20 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
         expected = {"injured_active": [{"name": "Cached"}], "cached": True}
         api_module._dashboard_cache_get = lambda *_args, **_kwargs: expected
-        api_module._dashboard_cache_set = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not write cache"))
-        api_module.season_manager.cmd_injury_report = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not recompute injury report"))
+        api_module._dashboard_cache_set = lambda *_args, **_kwargs: (
+            _ for _ in ()
+        ).throw(AssertionError("should not write cache"))
+        api_module.season_manager.cmd_injury_report = lambda *_args, **_kwargs: (
+            _ for _ in ()
+        ).throw(AssertionError("should not recompute injury report"))
 
         payload = api_module.api_injury_report()
 
@@ -2612,7 +3124,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
@@ -2620,8 +3134,13 @@ class ReliabilityHardeningTests(unittest.TestCase):
         cached_payloads = []
         api_module.request.args = {"pos_type": "p", "count": "7"}
         api_module._dashboard_cache_get = lambda *_args, **_kwargs: None
-        api_module._dashboard_cache_set = lambda key, payload: cached_payloads.append((key, payload))
-        api_module.season_manager.cmd_waiver_analyze = lambda args=None, as_json=False: calls.append((args or [], as_json)) or {"recommendations": []}
+        api_module._dashboard_cache_set = lambda key, payload: cached_payloads.append(
+            (key, payload)
+        )
+        api_module.season_manager.cmd_waiver_analyze = (
+            lambda args=None, as_json=False: calls.append((args or [], as_json))
+            or {"recommendations": []}
+        )
 
         payload = api_module.api_waiver_analyze()
 
@@ -2651,15 +3170,21 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
         expected = {"recommendations": [{"name": "Cached"}], "cached": True}
         api_module.request.args = {"pos_type": "B", "count": "5"}
         api_module._dashboard_cache_get = lambda *_args, **_kwargs: expected
-        api_module._dashboard_cache_set = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not write cache"))
-        api_module.season_manager.cmd_waiver_analyze = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not recompute waiver analysis"))
+        api_module._dashboard_cache_set = lambda *_args, **_kwargs: (
+            _ for _ in ()
+        ).throw(AssertionError("should not write cache"))
+        api_module.season_manager.cmd_waiver_analyze = lambda *_args, **_kwargs: (
+            _ for _ in ()
+        ).throw(AssertionError("should not recompute waiver analysis"))
 
         payload = api_module.api_waiver_analyze()
 
@@ -2685,14 +3210,23 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
         invalidations = []
-        api_module.request.get_json = lambda silent=True: {"moves": [{"player_id": "123", "position": "BN"}]}
-        api_module._invalidate_team_state_caches = lambda: invalidations.append("team-state")
-        api_module.season_manager.cmd_set_lineup = lambda args=None, as_json=False: {"success": True, "moves": args or []}
+        api_module.request.get_json = lambda silent=True: {
+            "moves": [{"player_id": "123", "position": "BN"}]
+        }
+        api_module._invalidate_team_state_caches = lambda: invalidations.append(
+            "team-state"
+        )
+        api_module.season_manager.cmd_set_lineup = lambda args=None, as_json=False: {
+            "success": True,
+            "moves": args or [],
+        }
 
         payload = api_module.api_set_lineup()
 
@@ -2719,14 +3253,24 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
         invalidations = []
-        api_module.request.get_json = lambda silent=True: {"moves": [{"player_id": "123", "position": "BN"}]}
-        api_module._invalidate_team_state_caches = lambda: invalidations.append("team-state")
-        api_module.season_manager.cmd_set_lineup = lambda args=None, as_json=False: {"success": False, "moves": args or [], "message": "failed"}
+        api_module.request.get_json = lambda silent=True: {
+            "moves": [{"player_id": "123", "position": "BN"}]
+        }
+        api_module._invalidate_team_state_caches = lambda: invalidations.append(
+            "team-state"
+        )
+        api_module.season_manager.cmd_set_lineup = lambda args=None, as_json=False: {
+            "success": False,
+            "moves": args or [],
+            "message": "failed",
+        }
 
         payload = api_module.api_set_lineup()
 
@@ -2753,14 +3297,21 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
         invalidations = []
         api_module.request.get_json = lambda silent=True: {"transaction_key": "tx-1"}
-        api_module._invalidate_team_state_caches = lambda: invalidations.append("team-state")
-        api_module.season_manager.cmd_accept_trade = lambda args=None, as_json=False: {"success": True, "transaction_key": (args or [""])[0]}
+        api_module._invalidate_team_state_caches = lambda: invalidations.append(
+            "team-state"
+        )
+        api_module.season_manager.cmd_accept_trade = lambda args=None, as_json=False: {
+            "success": True,
+            "transaction_key": (args or [""])[0],
+        }
 
         payload = api_module.api_accept_trade()
 
@@ -2770,7 +3321,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
     def test_auth_status_reports_oauth_and_browser_readiness(self):
         shared_module = _shared_stub()
         shared_module.OAUTH_FILE = "/tmp/yahoo_oauth.json"
-        shared_module.YAHOO_OAUTH_BRIDGE_URL = "https://dashboard.example/internal/baseclaw/yahoo_oauth"
+        shared_module.YAHOO_OAUTH_BRIDGE_URL = (
+            "https://dashboard.example/internal/baseclaw/yahoo_oauth"
+        )
         shared_module.YAHOO_OAUTH_BRIDGE_TOKEN = "secret"
         shared_module._read_oauth_file = lambda: {
             "consumer_key": "ck",
@@ -2779,12 +3332,20 @@ class ReliabilityHardeningTests(unittest.TestCase):
             "refresh_token": "rt",
             "guid": "guid-1",
         }
-        shared_module._oauth_has_tokens = lambda payload: bool(payload.get("access_token") and payload.get("refresh_token"))
+        shared_module._oauth_has_tokens = lambda payload: bool(
+            payload.get("access_token") and payload.get("refresh_token")
+        )
 
         yahoo_browser_module = _module("yahoo_browser")
         yahoo_browser_module.SESSION_FILE = "/tmp/yahoo_session.json"
-        yahoo_browser_module.is_session_valid = lambda: {"valid": False, "reason": "No session file found"}
-        yahoo_browser_module.get_heartbeat_state = lambda: {"last_ok": None, "last_error": None}
+        yahoo_browser_module.is_session_valid = lambda: {
+            "valid": False,
+            "reason": "No session file found",
+        }
+        yahoo_browser_module.get_heartbeat_state = lambda: {
+            "last_ok": None,
+            "last_error": None,
+        }
 
         api_module = _load_script(
             "api_server_auth_status_for_test",
@@ -2805,7 +3366,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": yahoo_browser_module,
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
         api_module.sys.modules["shared"] = shared_module
@@ -2837,17 +3400,24 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "intel": _module("intel"),
                 "news": _module("news"),
                 "yahoo_browser": types.SimpleNamespace(
-                    is_session_valid=lambda: {"valid": False, "reason": "No session file found"},
+                    is_session_valid=lambda: {
+                        "valid": False,
+                        "reason": "No session file found",
+                    },
                     get_heartbeat_state=lambda: {},
                 ),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
         payload, status = api_module._json_error(
-            RuntimeError("Browser session expired - redirected to login page. Run './yf browser-login' to refresh your session."),
+            RuntimeError(
+                "Browser session expired - redirected to login page. Run './yf browser-login' to refresh your session."
+            ),
             status=500,
         )
 
@@ -2903,12 +3473,19 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "intel": intel_module,
                 "news": _module("news"),
                 "yahoo_browser": types.SimpleNamespace(
-                    is_session_valid=lambda: {"valid": False, "reason": "No session file found"},
+                    is_session_valid=lambda: {
+                        "valid": False,
+                        "reason": "No session file found",
+                    },
                     get_heartbeat_state=lambda: {},
                 ),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda name, *_args, **_kwargs: 657277 if name == "Logan Webb" else None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda name, *_args, **_kwargs: (
+                        657277 if name == "Logan Webb" else None
+                    )
+                ),
             },
         )
 
@@ -2943,12 +3520,17 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "intel": _module("intel"),
                 "news": _module("news"),
                 "yahoo_browser": types.SimpleNamespace(
-                    is_session_valid=lambda: {"valid": False, "reason": "No session file found"},
+                    is_session_valid=lambda: {
+                        "valid": False,
+                        "reason": "No session file found",
+                    },
                     get_heartbeat_state=lambda: {},
                 ),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
@@ -2978,7 +3560,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
@@ -3027,7 +3611,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
             {
                 "yahoo_fantasy_api": _module("yahoo_fantasy_api"),
                 "valuations": valuations_module,
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: 77),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: 77
+                ),
                 "shared": types.SimpleNamespace(
                     enrich_with_intel=lambda *_args, **_kwargs: None,
                     get_team_key=lambda *_args, **_kwargs: "422.l.1.t.7",
@@ -3052,7 +3638,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
             def get_available(self, pos_type, count):
                 self.last = (pos_type, count)
-                return [{"name": "Fast FA", "eligible_positions": ["OF"], "z_score": 2.75}]
+                return [
+                    {"name": "Fast FA", "eligible_positions": ["OF"], "z_score": 2.75}
+                ]
 
         draft_module.DraftAssistant = FakeDraftAssistant
         payload = draft_module.cmd_best_available(["B", "1", "false"], as_json=True)
@@ -3061,12 +3649,16 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(payload["players"][0]["name"], "Fast FA")
         self.assertEqual(payload["players"][0]["z_score"], 2.75)
 
-    def test_search_uses_cached_available_players_pool_instead_of_live_free_agent_scans(self):
+    def test_search_uses_cached_available_players_pool_instead_of_live_free_agent_scans(
+        self,
+    ):
         yahoo_api_mod = _module("yahoo_fantasy_api")
         yahoo_oauth_mod = _module("yahoo_oauth")
         yahoo_oauth_mod.OAuth2 = object
         mlb_cache_mod = _module("mlb_id_cache")
-        mlb_cache_mod.get_mlb_id = lambda name, *_args, **_kwargs: 668901 if name == "Mark Vientos" else None
+        mlb_cache_mod.get_mlb_id = lambda name, *_args, **_kwargs: (
+            668901 if name == "Mark Vientos" else None
+        )
 
         available_calls = []
         shared = _shared_stub()
@@ -3111,7 +3703,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
             ]
 
         module.get_available_players = fake_available_players
-        module.get_league = lambda: (_ for _ in ()).throw(AssertionError("live Yahoo league scan should not run"))
+        module.get_league = lambda: (_ for _ in ()).throw(
+            AssertionError("live Yahoo league scan should not run")
+        )
 
         payload = module.cmd_search(["Mark", "Vientos"], as_json=True)
 
@@ -3133,7 +3727,13 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 return {"players": [], "pos_type": "B", "source": "json"}
             return {
                 "players": [
-                    {"rank": 1, "name": "Recovered Bat", "team": "ATL", "pos": "OF", "z_score": 4.2}
+                    {
+                        "rank": 1,
+                        "name": "Recovered Bat",
+                        "team": "ATL",
+                        "pos": "OF",
+                        "z_score": 4.2,
+                    }
                 ],
                 "pos_type": "B",
                 "source": "csv",
@@ -3161,7 +3761,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
@@ -3172,6 +3774,47 @@ class ReliabilityHardeningTests(unittest.TestCase):
         self.assertEqual(first_payload["players"], [])
         self.assertEqual(second_payload["players"][0]["name"], "Recovered Bat")
         self.assertEqual(call_count["count"], 2)
+
+    def test_intel_player_endpoint_accepts_player_name_alias(self):
+        intel_module = _module("intel")
+        calls = []
+
+        def fake_cmd_player_report(args, as_json=False):
+            calls.append((args, as_json))
+            return {"name": args[0], "ok": True}
+
+        intel_module.cmd_player_report = fake_cmd_player_report
+
+        api_module = _load_script(
+            "api_server_intel_player_alias_for_test",
+            "api-server.py",
+            {
+                "flask": _flask_stub(),
+                "position_batching": _position_batching_stub(),
+                "trace_utils": _trace_utils_stub(),
+                "shared": _shared_stub(),
+                "yahoo-fantasy": _module("yahoo-fantasy"),
+                "draft-assistant": _module("draft-assistant"),
+                "mlb-data": _module("mlb-data"),
+                "season-manager": _module("season-manager"),
+                "valuations": _module("valuations"),
+                "history": _module("history"),
+                "intel": intel_module,
+                "news": _module("news"),
+                "yahoo_browser": _module("yahoo_browser"),
+                "player_universe": _module("player_universe"),
+                "draft_sim": _module("draft_sim"),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
+            },
+        )
+
+        api_module.request.args = {"player_name": " Aaron Judge "}
+        payload = api_module.api_intel_player()
+
+        self.assertEqual(payload["name"], "Aaron Judge")
+        self.assertEqual(calls, [(["Aaron Judge"], True)])
 
     def test_rankings_cache_skips_empty_grouped_all_payloads(self):
         api_module = _load_script(
@@ -3193,19 +3836,28 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
         empty_grouped = {
             "groups": {
-                "B": {"players": [], "buckets": {"C": [], "1B": []}, "pos_type": "B", "source": "json"},
+                "B": {
+                    "players": [],
+                    "buckets": {"C": [], "1B": []},
+                    "pos_type": "B",
+                    "source": "json",
+                },
                 "P": {"players": [], "pos_type": "P", "source": "json"},
             },
             "pos_type": "ALL",
         }
 
-        api_module._set_cached_rankings("ALL", 3, True, ["C", "1B"], empty_grouped, True)
+        api_module._set_cached_rankings(
+            "ALL", 3, True, ["C", "1B"], empty_grouped, True
+        )
         cached = api_module._get_cached_rankings("ALL", 3, True, ["C", "1B"], True)
 
         self.assertIsNone(cached)
@@ -3257,7 +3909,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
@@ -3335,28 +3989,34 @@ class ReliabilityHardeningTests(unittest.TestCase):
     def test_best_available_uses_combined_available_pool(self):
         valuations_module = _module("valuations")
         valuations_module.load_all = lambda: ([], [], "test")
-        valuations_module.get_player_by_name = lambda name, *_args, **_kwargs: [
-            {"Z_Final": 3.5}
-        ] if name == "Waiver Arm" else [{"Z_Final": 2.1}]
+        valuations_module.get_player_by_name = lambda name, *_args, **_kwargs: (
+            [{"Z_Final": 3.5}] if name == "Waiver Arm" else [{"Z_Final": 2.1}]
+        )
 
         yahoo_module = _module("yahoo-fantasy")
-        yahoo_module._infer_pos_type = lambda positions: "P" if "SP" in positions else "B"
-        yahoo_module.get_available_players = lambda pos_type, _count=None: [
-            {
-                "player_id": "9",
-                "name": "Waiver Arm",
-                "eligible_positions": ["SP", "P"],
-                "team": "ATL",
-                "availability_type": "waiver",
-            },
-            {
-                "player_id": "10",
-                "name": "Free Arm",
-                "eligible_positions": ["SP", "P"],
-                "team": "MIA",
-                "availability_type": "free_agent",
-            },
-        ] if pos_type == "P" else []
+        yahoo_module._infer_pos_type = lambda positions: (
+            "P" if "SP" in positions else "B"
+        )
+        yahoo_module.get_available_players = lambda pos_type, _count=None: (
+            [
+                {
+                    "player_id": "9",
+                    "name": "Waiver Arm",
+                    "eligible_positions": ["SP", "P"],
+                    "team": "ATL",
+                    "availability_type": "waiver",
+                },
+                {
+                    "player_id": "10",
+                    "name": "Free Arm",
+                    "eligible_positions": ["SP", "P"],
+                    "team": "MIA",
+                    "availability_type": "free_agent",
+                },
+            ]
+            if pos_type == "P"
+            else []
+        )
 
         draft_module = _load_script(
             "draft_assistant_available_pool_test",
@@ -3364,7 +4024,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
             {
                 "yahoo_fantasy_api": _module("yahoo_fantasy_api"),
                 "valuations": valuations_module,
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: 88),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: 88
+                ),
                 "shared": types.SimpleNamespace(
                     enrich_with_intel=lambda *_args, **_kwargs: None,
                     get_team_key=lambda *_args, **_kwargs: "422.l.1.t.7",
