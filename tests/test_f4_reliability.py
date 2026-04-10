@@ -512,8 +512,12 @@ class ReliabilityHardeningTests(unittest.TestCase):
             {
                 "pandas": _pandas_stub(),
                 "numpy": _numpy_stub(),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: ""),
-                "shared": types.SimpleNamespace(enrich_with_intel=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: ""
+                ),
+                "shared": types.SimpleNamespace(
+                    enrich_with_intel=lambda *_args, **_kwargs: None
+                ),
                 "trace_utils": _trace_utils_stub(),
             },
         )
@@ -528,8 +532,12 @@ class ReliabilityHardeningTests(unittest.TestCase):
         valuations_module._PROJECTION_FAILURE_TTL = 999
 
         with patch("builtins.print"):
-            first = valuations_module.fetch_fangraphs_projections("bat", proj_type="steamer")
-            second = valuations_module.fetch_fangraphs_projections("bat", proj_type="steamer")
+            first = valuations_module.fetch_fangraphs_projections(
+                "bat", proj_type="steamer"
+            )
+            second = valuations_module.fetch_fangraphs_projections(
+                "bat", proj_type="steamer"
+            )
 
         self.assertIsNone(first)
         self.assertIsNone(second)
@@ -1955,7 +1963,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
         stale_payload = {"players": [{"name": "Cached"}], "position": None, "count": 1}
         api_module.os.environ["TAKEN_PLAYERS_TIMEOUT_SECONDS"] = "0"
         api_module.request.args = {}
-        api_module._DASHBOARD_CACHE = {("taken-players", ""): (stale_payload, time.time() - 180)}
+        api_module._DASHBOARD_CACHE = {
+            ("taken-players", ""): (stale_payload, time.time() - 180)
+        }
         payload = api_module.api_taken_players()
 
         self.assertEqual(payload, stale_payload)
@@ -2096,7 +2106,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
                 "yahoo_browser": _module("yahoo_browser"),
                 "player_universe": _module("player_universe"),
                 "draft_sim": _module("draft_sim"),
-                "mlb_id_cache": types.SimpleNamespace(get_mlb_id=lambda *_args, **_kwargs: None),
+                "mlb_id_cache": types.SimpleNamespace(
+                    get_mlb_id=lambda *_args, **_kwargs: None
+                ),
             },
         )
 
@@ -2105,7 +2117,9 @@ class ReliabilityHardeningTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_path = pathlib.Path(tmpdir) / "taken-players.json"
-            cache_path.write_text(json.dumps({"players": [{"name": "Cached"}], "count": 1}))
+            cache_path.write_text(
+                json.dumps({"players": [{"name": "Cached"}], "count": 1})
+            )
             stale_age = time.time() - 1000
             api_module.os.utime(cache_path, (stale_age, stale_age))
             api_module._dashboard_cache_file = lambda _key: str(cache_path)
